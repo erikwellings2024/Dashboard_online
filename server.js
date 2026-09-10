@@ -10,6 +10,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 const app = express();
 // Railway runs the app behind a reverse proxy.
@@ -380,6 +381,164 @@ function normalizeRow(r) {
   };
 }
 
+
+function excelJsCellValue(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v !== 'object') return v;
+  if (Object.prototype.hasOwnProperty.call(v,'result')) return v.result;
+  if (Array.isArray(v.richText)) return v.richText.map(x=>x.text||'').join('');
+  if (Object.prototype.hasOwnProperty.call(v,'text')) return v.text;
+  if (Object.prototype.hasOwnProperty.call(v,'hyperlink')) return v.text || v.hyperlink;
+  return String(v);
+}
+
+function writeWithBackpressure(stream, chunk) {
+  return new Promise((resolve,reject)=>{
+    const onError=(e)=>{ cleanup(); reject(e); };
+    const onDrain=()=>{ cleanup(); resolve(); };
+    const cleanup=()=>{ stream.off('error',onError); stream.off('drain',onDrain); };
+    stream.once('error',onError);
+    if (stream.write(chunk)) { cleanup(); resolve(); }
+    else stream.once('drain',onDrain);
+  });
+}
+
+async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
+  // Determine RAW/first sheet without expanding worksheet XML into JS objects.
+  const metaWb = XLSX.readFile(filePath,{bookSheets:true});
+  const selectedSheet = metaWb.SheetNames.includes('RAW') ? 'RAW' : metaWb.SheetNames[0];
+  if (!selectedSheet) throw new Error('RAW_FORMAT_INVALID. Workbook has no worksheet.');
+
+  const targetFile=monthPath(targetMonth);
+  await fsp.mkdir(path.dirname(targetFile),{recursive:true});
+  const tmp=`${targetFile}.${process.pid}.${Date.now()}.upload.tmp`;
+  const out=fs.createWriteStream(tmp,{encoding:'utf8'});
+
+  let headerMap=null;
+  let rawRowsCount=0, validRows=0, written=0;
+  let minDate=null, maxDate=null;
+  const detectedMonths=new Set();
+  const channelSummary={};
+  let selectedFound=false;
+
+  const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
+  const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
+
+  const reader=new ExcelJS.stream.xlsx.WorkbookReader(filePath,{
+    entries:'emit',
+    sharedStrings:'cache',
+    hyperlinks:'ignore',
+    styles:'cache',
+    worksheets:'emit'
+  });
+
+  try {
+    await writeWithBackpressure(out,'[');
+
+    for await (const ws of reader) {
+      if (ws.name !== selectedSheet) continue;
+      selectedFound=true;
+      let rowNo=0;
+
+      for await (const row of ws) {
+        rowNo++;
+        if (rowNo===1) {
+          headerMap=new Map();
+          const values=row.values||[];
+          for (let i=1;i<values.length;i++) {
+            const key=String(excelJsCellValue(values[i])??'').trim();
+            if (key) headerMap.set(key,i);
+          }
+
+          const hasRequired=required.every(k=>headerMap.has(k));
+          const hasChannel=channelColumns.some(k=>headerMap.has(k));
+          if (!hasRequired || !hasChannel) {
+            throw new Error(
+              `RAW_FORMAT_INVALID. Required columns: ${required.join(', ')}. `+
+              `Channel column: one of ${channelColumns.join(', ')}`
+            );
+          }
+          continue;
+        }
+
+        const get=(name)=>{
+          const idx=headerMap.get(name);
+          return idx ? excelJsCellValue(row.getCell(idx).value) : null;
+        };
+
+        // Ignore fully blank trailing rows.
+        const transactionDate=get('transaction_date');
+        const invoiceNo=get('invoice_no');
+        if (transactionDate==null && invoiceNo==null) continue;
+
+        rawRowsCount++;
+        const raw={
+          transaction_date:transactionDate,
+          invoice_no:invoiceNo,
+          store_location:get('store_location'),
+          new_item_code:get('new_item_code'),
+          old_item_code:get('old_item_code'),
+          item_name:get('item_name'),
+          brand:get('brand'),
+          category_2:get('category_2'),
+          trader_check:get('trader_check'),
+          sub_total:get('sub_total'),
+          qty:get('qty'),
+          telemed_check:get('telemed_check'),
+          TELEMED:get('TELEMED'),
+          telemed:get('telemed'),
+          channel_dashboard:get('channel_dashboard'),
+          channel_type:get('channel_type')
+        };
+
+        const n=normalizeRow(raw);
+        if (!(n.date && n.invoice && n.channel)) continue;
+
+        validRows++;
+        const mk=monthKey(n.date);
+        detectedMonths.add(mk);
+        if (!minDate || n.date<minDate) minDate=n.date;
+        if (!maxDate || n.date>maxDate) maxDate=n.date;
+        channelSummary[n.channel]=(channelSummary[n.channel]||0)+1;
+
+        const json=JSON.stringify(n);
+        await writeWithBackpressure(out,(written?',':'')+json);
+        written++;
+      }
+      break;
+    }
+
+    if (!selectedFound) throw new Error(`RAW_FORMAT_INVALID. Worksheet "${selectedSheet}" was not found.`);
+    if (!validRows) throw new Error(`NO_VALID_ROWS. Parsed rows=${rawRowsCount}, valid rows=0.`);
+
+    const months=[...detectedMonths].sort();
+    if (months.length!==1 || months[0]!==targetMonth) {
+      throw new Error(`MONTH_MISMATCH. Selected ${targetMonth}, but Excel contains: ${months.join(', ')}. Upload one month only.`);
+    }
+
+    await writeWithBackpressure(out,']');
+    await new Promise((resolve,reject)=>{
+      out.once('error',reject);
+      out.end(resolve);
+    });
+    await fsp.rename(tmp,targetFile);
+
+    return {
+      rawRows:rawRowsCount,
+      validRows,
+      minDate,
+      maxDate,
+      detectedMonths:months,
+      channelSummary
+    };
+  } catch(e) {
+    try { out.destroy(); } catch {}
+    await fsp.unlink(tmp).catch(()=>{});
+    throw e;
+  }
+}
+
 function normalizePeriods(periods) {
   if (!Array.isArray(periods) || periods.length < 1 || periods.length > 3) throw new Error('PERIODS_INVALID');
   return periods.map(p => {
@@ -713,51 +872,17 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     // Safety is provided by one-month validation plus upload history/audit metadata.
     const status=monthStatus(targetMonth);
 
-    const wb=XLSX.readFile(req.file.path,{cellDates:true});
-    const sheetName=wb.SheetNames.includes('RAW')?'RAW':wb.SheetNames[0];
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:null,raw:true});
+    // Stream the XLSX row-by-row. This avoids loading the full workbook and a second
+    // normalized copy into memory, which caused Railway SIGKILL on larger months.
+    const replacedRows=Number(monthIndex[targetMonth]?.rowCount||0);
+    const streamed=await streamReplaceMonthFromXlsx(req.file.path,targetMonth);
+    console.log(`[UPLOAD] user=${req.user.username} target=${targetMonth} file=${req.file.originalname} rawRows=${streamed.rawRows} validRows=${streamed.validRows} channels=${JSON.stringify(streamed.channelSummary)}`);
 
-    const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
-    const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
-    const hasRequired = rows.length && required.every(k=>Object.prototype.hasOwnProperty.call(rows[0],k));
-    const hasChannelColumn = rows.length && channelColumns.some(k=>Object.prototype.hasOwnProperty.call(rows[0],k));
-    if (!hasRequired || !hasChannelColumn) {
-      throw new Error(
-        `RAW_FORMAT_INVALID. Required columns: ${required.join(', ')}. ` +
-        `Channel column: one of ${channelColumns.join(', ')}`
-      );
-    }
-
-    const normalizedAll=rows.map(normalizeRow);
-    const normalized=normalizedAll.filter(r=>r.date && r.invoice && r.channel);
-    if (!normalized.length) {
-      const dateOk=normalizedAll.filter(r=>r.date).length;
-      const invoiceOk=normalizedAll.filter(r=>r.invoice).length;
-      const channelOk=normalizedAll.filter(r=>r.channel).length;
-      throw new Error(`NO_VALID_ROWS. Parsed rows=${rows.length}, valid dates=${dateOk}, invoices=${invoiceOk}, channels=${channelOk}`);
-    }
-
-    const channelSummary={};
-    for (const r of normalized) channelSummary[r.channel]=(channelSummary[r.channel]||0)+1;
-    console.log(`[UPLOAD] user=${req.user.username} target=${targetMonth} file=${req.file.originalname} rawRows=${rows.length} validRows=${normalized.length} channels=${JSON.stringify(channelSummary)}`);
-
-    const detectedMonths=[...new Set(normalized.map(r=>monthKey(r.date)))].sort();
-    if (detectedMonths.length!==1 || detectedMonths[0]!==targetMonth) {
-      const err=new Error(`MONTH_MISMATCH. Selected ${targetMonth}, but Excel contains: ${detectedMonths.join(', ')}. Upload one month only.`);
-      err.statusCode=400; throw err;
-    }
-
-    const incomingCoverage=dataCoverage(normalized);
-    const oldMonthRows=await readJson(monthPath(targetMonth),[]);
-    const replacedRows=Array.isArray(oldMonthRows)?oldMonthRows.length:0;
-
-    // Entire selected month partition is replaced. Admin may refresh any historical month at any time.
-    await writeMonthRows(targetMonth, normalized);
-
+    const incomingCoverage={minDate:streamed.minDate,maxDate:streamed.maxDate};
     const now=new Date().toISOString();
     monthIndex[targetMonth]={
       month:targetMonth,
-      rowCount:normalized.length,
+      rowCount:streamed.validRows,
       minDate:incomingCoverage.minDate,
       maxDate:incomingCoverage.maxDate,
       updatedAt:now,
@@ -767,8 +892,12 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     };
     await writeJsonAtomic(MONTH_INDEX_FILE,monthIndex);
 
-    // Refresh in-memory combined dataset from monthly partitions.
-    rawRows=await readAllMonthlyRows();
+    // Refresh only the replaced month in memory. Do not re-read every historical
+    // partition during upload.
+    const kept=rawRows.filter(r=>monthKey(r.date)!==targetMonth);
+    const freshMonth=await readJson(monthPath(targetMonth),[]);
+    rawRows=kept.concat(Array.isArray(freshMonth)?freshMonth:[]);
+    rawRows.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
     const coverage=dataCoverage(rawRows);
 
     const entry={
@@ -780,7 +909,7 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
       targetMonth,
       detectedStart:incomingCoverage.minDate,
       detectedEnd:incomingCoverage.maxDate,
-      incomingRows:normalized.length,
+      incomingRows:streamed.validRows,
       replacedRows,
       totalRows:rawRows.length,
       monthStatusBefore:status
@@ -797,7 +926,7 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     res.json({
       ok:true,mode:'monthly_replace',targetMonth,
       detectedStart:incomingCoverage.minDate,detectedEnd:incomingCoverage.maxDate,
-      incomingRows:normalized.length,replacedRows,rowCount:rawRows.length,
+      incomingRows:streamed.validRows,replacedRows,rowCount:rawRows.length,
       minDate:coverage.minDate,maxDate:coverage.maxDate,month:monthIndex[targetMonth],
       monthSlots:monthSlots()
     });
@@ -899,4 +1028,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Monthly closing: disabled`)));
