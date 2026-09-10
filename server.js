@@ -370,7 +370,8 @@ function normalizeRow(r) {
     store: store.name,
     pt: store.pt,
     channel: canonicalChannel(rawChannel),
-    sku: String(r.old_item_code || r.new_item_code || '').trim(),
+    // Canonical dashboard SKU is new_item_code.
+    sku: String(r.new_item_code || r.old_item_code || '').trim(),
     newItemCode: String(r.new_item_code || '').trim(),
     itemName: String(r.item_name || '').trim(),
     brand: String(r.brand || '').trim() || 'UNBRANDED',
@@ -726,7 +727,7 @@ function brandQuery(periods, filters, topN) {
 
 function itemQuery(periods, filters, topN) {
   const base = filterBase(filters);
-  const groups = groupBy(base, r=>`${r.sku}|||${r.itemName}|||${r.brand}`);
+  const groups = groupBy(base, r=>`${String(r.newItemCode || r.sku || '').trim()}|||${r.itemName}|||${r.brand}`);
   const all = [...groups.entries()].map(([key,rr])=>{
     const [sku,itemName,brand] = key.split('|||');
     const m = metricsByPeriod(rr,periods);
@@ -831,9 +832,10 @@ app.get('/api/meta/products', requireAuth, (req,res)=>{
   const seen=new Set(), out=[];
   for (const r of rawRows) {
     if (!(`${r.sku} ${r.newItemCode} ${r.itemName}`.toUpperCase().includes(q))) continue;
-    const key=`${r.sku}|${r.itemName}`;
+    const displaySku=String(r.newItemCode || r.sku || '').trim();
+    const key=`${displaySku}|${r.itemName}`;
     if (seen.has(key)) continue;
-    seen.add(key); out.push({sku:r.sku,newItemCode:r.newItemCode,itemName:r.itemName,brand:r.brand});
+    seen.add(key); out.push({sku:displaySku,newItemCode:r.newItemCode,itemName:r.itemName,brand:r.brand});
     if (out.length>=50) break;
   }
   res.json(out);
@@ -1035,4 +1037,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | Monthly closing: disabled`)));
