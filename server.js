@@ -376,7 +376,13 @@ function normalizeRow(r) {
     brand: String(r.brand || '').trim() || 'UNBRANDED',
     category: mapCategory(r.category_2),
     salesType: String(r.trader_check || '').trim() || 'Regular',
-    sales: safeNum(r.sub_total),
+    // Excel reference dashboard uses sub_total_inv as the sales measure.
+    // Fall back to sub_total only when sub_total_inv is missing/blank.
+    sales: safeNum(
+      (r.sub_total_inv !== null && r.sub_total_inv !== undefined && r.sub_total_inv !== '')
+        ? r.sub_total_inv
+        : r.sub_total
+    ),
     qty: safeNum(r.qty)
   };
 }
@@ -484,6 +490,7 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
           category_2:get('category_2'),
           trader_check:get('trader_check'),
           sub_total:get('sub_total'),
+          sub_total_inv:get('sub_total_inv'),
           qty:get('qty'),
           telemed_check:get('telemed_check'),
           TELEMED:get('TELEMED'),
@@ -1028,4 +1035,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | Monthly closing: disabled`)));
