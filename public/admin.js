@@ -21,9 +21,9 @@ $('#saveStores').onclick=async()=>{try{CFG.stores=collectStores();await saveConf
 function bindRemove(){$$('.remove-row').forEach(b=>b.onclick=()=>b.closest('tr').remove())}
 async function saveConfig(){const d=await api('/api/admin/config',{method:'PUT',body:JSON.stringify(CFG)});CFG=d.config;return d}
 
-function renderTarget(){const month=$('#targetMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
+function renderTarget(){const month=$('#targetConfigMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
 $('#loadTarget').onclick=renderTarget;
-$('#saveTarget').onclick=async()=>{try{const month=$('#targetMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
+$('#saveTarget').onclick=async()=>{try{const month=$('#targetConfigMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
 
 async function loadUsers(){USERS=await api('/api/admin/users');renderUsers()}
 function renderUsers(){$('#userTable tbody').innerHTML=USERS.map(u=>`<tr data-id="${u.id}"><td>${esc(u.username)}</td><td><input class="u-name" value="${esc(u.displayName||u.username)}"></td><td><select class="u-role"><option value="guest" ${u.role==='guest'?'selected':''}>Guest</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td><td class="center"><input class="u-active" type="checkbox" ${u.active?'checked':''}></td><td><input class="u-pass" type="password" placeholder="Leave blank"></td><td class="action-cell"><button class="btn save-user">Save</button> <button class="btn red delete-user">Delete</button></td></tr>`).join('');$$('.save-user').forEach(b=>b.onclick=()=>saveUser(b.closest('tr')));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.closest('tr')))}
@@ -44,17 +44,39 @@ function monthName(key){
   return new Date(Date.UTC(y,m-1,1)).toLocaleDateString('en-GB',{month:'short',year:'numeric',timeZone:'UTC'});
 }
 
+function fallbackMonthSlots(){
+  const out=[];
+  for(let y=2026;y<=2028;y++){
+    for(let m=1;m<=12;m++){
+      out.push({
+        month:`${y}-${String(m).padStart(2,'0')}`,
+        status:'NO DATA',rowCount:0,minDate:null,maxDate:null,
+        updatedAt:null,uploadedBy:null,sourceFile:null
+      });
+    }
+  }
+  return out;
+}
+
+function monthSlots(){
+  const apiSlots=Array.isArray(META?.monthSlots)?META.monthSlots:[];
+  return apiSlots.length?apiSlots:fallbackMonthSlots();
+}
+
 function initMonthSelect(){
-  const slots=META?.monthSlots||[];
+  const slots=monthSlots();
   const p=META?.uploadPolicy||{};
-  $('#targetMonth').innerHTML=slots.map(s=>`<option value="${s.month}">${monthName(s.month)} — ${s.rowCount?'DATA':'NO DATA'}</option>`).join('');
-  const preferred=slots.find(s=>s.month===p.currentMonth) || slots[0];
-  if(preferred)$('#targetMonth').value=preferred.month;
+  const el=$('#uploadMonth');
+  el.innerHTML=slots.map(s=>`<option value="${s.month}">${monthName(s.month)} — ${Number(s.rowCount||0)>0?'DATA':'NO DATA'}</option>`).join('');
+  const preferred=slots.find(s=>s.month===p.currentMonth) || slots.find(s=>s.month==='2026-09') || slots[0];
+  if(preferred)el.value=preferred.month;
+  const info=$('#monthSelectorInfo');
+  if(info) info.textContent=`${slots.length} month folders available • Jan 2026 – Dec 2028 • any month can be replaced anytime`;
 }
 
 function renderMonthStorage(){
   const year=$('#monthYear').value;
-  const slots=(META?.monthSlots||[]).filter(s=>s.month.startsWith(year+'-'));
+  const slots=monthSlots().filter(s=>s.month.startsWith(year+'-'));
   $('#monthStorageTable tbody').innerHTML=slots.map(s=>{
     const effectiveStatus=s.rowCount?'DATA':'NO DATA';
     const cls=s.rowCount?'open':'empty';
@@ -70,8 +92,8 @@ function renderMonthStorage(){
     </tr>`;
   }).join('');
   $$('.select-month').forEach(b=>b.onclick=()=>{
-    $('#targetMonth').value=b.dataset.month;
-    $('#targetMonth').scrollIntoView({behavior:'smooth',block:'center'});
+    $('#uploadMonth').value=b.dataset.month;
+    $('#uploadMonth').scrollIntoView({behavior:'smooth',block:'center'});
   });
 }
 
@@ -100,7 +122,7 @@ $('#rawFile').onchange=()=>{
 $('#uploadRaw').onclick=async()=>{
   const f=$('#rawFile').files[0];
   if(!f)return msg('#uploadMsg','Choose .xlsx/.xls file first.',false);
-  const targetMonth=$('#targetMonth').value;
+  const targetMonth=$('#uploadMonth').value;
   const ok=confirm(`Upload ${f.name} into folder ${targetMonth}? Existing data for this month will be replaced. This month can be updated again anytime.`);
   if(!ok)return;
 
@@ -128,5 +150,29 @@ function renderRuntime(){
     (last.targetMonth?`<br><b>Last Folder Updated:</b> ${esc(last.targetMonth)} &nbsp; | &nbsp; <b>Source:</b> ${esc(last.sourceFile||'-')}`:'');
 }
 
-async function boot(){ME=await api('/api/auth/me');if(ME.role!=='admin')return location.href='/dashboard.html';$('#userChip').textContent=`${ME.displayName||ME.username} • ADMIN`;CFG=await api('/api/admin/config');META=await api('/api/meta');renderChannels();renderStores();renderTarget();renderRuntime();renderUploadPolicy();initMonthSelect();renderMonthStorage();renderUploadHistory();await loadUsers()}
-boot().catch(e=>console.error(e));
+async function boot(){
+  ME=await api('/api/auth/me');
+  if(ME.role!=='admin')return location.href='/dashboard.html';
+  $('#userChip').textContent=`${ME.displayName||ME.username} • ADMIN`;
+  CFG=await api('/api/admin/config');
+  META=await api('/api/meta');
+
+  const currentMonth=META?.uploadPolicy?.currentMonth || new Date().toISOString().slice(0,7);
+  const targetEl=$('#targetConfigMonth');
+  if(targetEl) targetEl.value=currentMonth;
+
+  renderChannels();
+  renderStores();
+  initMonthSelect();
+  renderTarget();
+  renderRuntime();
+  renderUploadPolicy();
+  renderMonthStorage();
+  renderUploadHistory();
+  await loadUsers();
+}
+boot().catch(e=>{
+  console.error(e);
+  const info=$('#monthSelectorInfo');
+  if(info) info.textContent='Admin page initialization error: '+e.message;
+});
