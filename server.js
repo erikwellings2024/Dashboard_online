@@ -12,6 +12,11 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 
 const app = express();
+
+// Railway sits behind a reverse proxy. Trust one proxy hop so rate limiting
+// can safely read the forwarded client address without validation warnings.
+app.set('trust proxy', 1);
+
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const ROOT = __dirname;
@@ -23,6 +28,8 @@ const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json');
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || 'false').toLowerCase() === 'true';
+const MAX_UPLOAD_MB = Math.max(10, Math.min(500, Number(process.env.MAX_UPLOAD_MB || 250)));
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 if (NODE_ENV === 'production' && JWT_SECRET === 'dev-only-change-this-secret') {
   console.error('ERROR: JWT_SECRET must be set in production.');
@@ -508,7 +515,7 @@ app.post('/api/query/items', requireAuth, (req,res)=>{
 
 const upload = multer({
   dest: UPLOAD_DIR,
-  limits: { fileSize: 100*1024*1024 },
+  limits: { fileSize: MAX_UPLOAD_BYTES },
   fileFilter: (req,file,cb)=> cb(null, /\.(xlsx|xls)$/i.test(file.originalname))
 });
 
@@ -618,8 +625,13 @@ app.use(express.static(path.join(ROOT,'public'),{index:false}));
 
 app.use((err,req,res,next)=>{
   console.error(err);
-  if (err instanceof multer.MulterError) return res.status(400).json({error:err.code});
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error:`FILE_TOO_LARGE. Maximum upload is ${MAX_UPLOAD_MB} MB.` });
+    }
+    return res.status(400).json({error:err.code});
+  }
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,()=>console.log(`Sales dashboard running on http://localhost:${PORT}`)));
+bootstrap().then(()=>app.listen(PORT, '0.0.0.0', ()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB`)));
