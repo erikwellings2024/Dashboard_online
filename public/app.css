@@ -51,3 +51,42 @@ th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:20px
 .muted-mini{font-size:8px;color:#89939e}
 @media(max-width:1450px){.monthly-controls{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:800px){.monthly-controls{grid-template-columns:1fr}}
+
+
+/* Dashboard readability + layout refinement v9
+   Arial was already the active font; this increases usable type size and
+   reduces the "small text / empty cell" feel without changing the table style. */
+body,button,input,select,table{font-family:Arial,Helvetica,sans-serif}
+.page{max-width:1920px;padding:12px}
+.section-head{padding:10px 11px}
+.section-title h2{font-size:17px}
+.section-title p{font-size:11px}
+.section-filter{padding:9px 10px}
+.filter-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px}
+.field label{font-size:10px}
+.control{font-size:11.5px;height:36px}
+.apply{font-size:11.5px;height:36px;min-width:110px}
+.check{font-size:11px}
+.search-input{font-size:10.5px}
+
+th,td{font-size:13.5px;line-height:1.16;padding:6px 7px}
+thead th{font-size:13px;padding:7px 7px}
+.period-sub{font-size:10px}
+.rank-box h3{font-size:13.5px;padding:9px 10px}
+
+/* Section 5 ranking tables are intentionally stacked vertically. */
+.rank-grid{display:grid;grid-template-columns:1fr;gap:16px;padding:10px}
+.rank-box table{min-width:1200px}
+
+/* Sort feedback */
+th.sortable{padding-right:23px}
+.sort-mark{right:6px;line-height:8px;font-size:7px;opacity:.65}
+.sort-mark span{display:block;height:7px}
+th.sort-asc .sort-mark span:first-child,
+th.sort-desc .sort-mark span:last-child{color:#1f5f91;font-size:8px;opacity:1}
+th.sort-asc .sort-mark span:last-child,
+th.sort-desc .sort-mark span:first-child{opacity:.25}
+
+@media(max-width:1450px){
+  .filter-grid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}
+}
