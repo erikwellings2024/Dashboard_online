@@ -12,11 +12,8 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 
 const app = express();
-
-// Railway sits behind a reverse proxy. Trust one proxy hop so rate limiting
-// can safely read the forwarded client address without validation warnings.
+// Railway runs the app behind a reverse proxy.
 app.set('trust proxy', 1);
-
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const ROOT = __dirname;
@@ -24,8 +21,12 @@ const DATA_DIR = path.join(ROOT, 'data');
 const UPLOAD_DIR = path.join(ROOT, 'uploads');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
-const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json');
+const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined cache; monthly files are canonical
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
+const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
+const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
+const STORAGE_START_MONTH = '2026-01';
+const STORAGE_END_MONTH = '2028-12';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || 'false').toLowerCase() === 'true';
 const MAX_UPLOAD_MB = Math.max(10, Math.min(500, Number(process.env.MAX_UPLOAD_MB || 250)));
@@ -38,6 +39,7 @@ if (NODE_ENV === 'production' && JWT_SECRET === 'dev-only-change-this-secret') {
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(MONTHLY_DIR, { recursive: true });
 
 const DEFAULT_CONFIG = {
   channels: [
@@ -97,7 +99,8 @@ const DEFAULT_CONFIG = {
 
 let config = null;
 let rawRows = [];
-let runtime = { updatedAt: null, sourceFile: null, rowCount: 0 };
+let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
+let monthIndex = {};
 
 async function readJson(file, fallback) {
   try { return JSON.parse(await fsp.readFile(file, 'utf8')); }
@@ -110,6 +113,101 @@ async function writeJsonAtomic(file, value) {
   await fsp.rename(tmp, file);
 }
 
+
+function monthPath(key) {
+  const [year, month] = String(key).split('-');
+  return path.join(MONTHLY_DIR, year, `${month}.json`);
+}
+
+function monthMetaPathKey(key) { return String(key); }
+
+function monthAllowed(key) {
+  return /^\d{4}-\d{2}$/.test(String(key)) && key >= STORAGE_START_MONTH && key <= STORAGE_END_MONTH;
+}
+
+function storageMonthKeys() {
+  const out=[];
+  let cur=STORAGE_START_MONTH;
+  let guard=0;
+  while (cur<=STORAGE_END_MONTH && guard<60) {
+    out.push(cur);
+    const [y,m]=cur.split('-').map(Number);
+    const d=new Date(Date.UTC(y,m,1));
+    cur=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+    guard++;
+  }
+  return out;
+}
+
+async function ensureMonthlyFolders() {
+  for (const y of ['2026','2027','2028']) await fsp.mkdir(path.join(MONTHLY_DIR,y), {recursive:true});
+}
+
+async function readAllMonthlyRows() {
+  const all=[];
+  for (const key of storageMonthKeys()) {
+    const rows=await readJson(monthPath(key), []);
+    if (Array.isArray(rows) && rows.length) all.push(...rows);
+  }
+  all.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return all;
+}
+
+async function writeMonthRows(key, rows) {
+  if (!monthAllowed(key)) throw new Error(`MONTH_OUT_OF_RANGE:${key}`);
+  const file=monthPath(key);
+  await fsp.mkdir(path.dirname(file), {recursive:true});
+  await writeJsonAtomic(file, rows);
+}
+
+async function migrateLegacyCacheIfNeeded() {
+  const existing=await readAllMonthlyRows();
+  if (existing.length) return existing;
+  const legacy=await readJson(RAW_CACHE_FILE, []);
+  if (!Array.isArray(legacy) || !legacy.length) return [];
+  const grouped={};
+  for (const r of legacy) {
+    const key=monthKey(r.date);
+    if (!monthAllowed(key)) continue;
+    (grouped[key] ||= []).push(r);
+  }
+  for (const [key,rows] of Object.entries(grouped)) {
+    await writeMonthRows(key, rows);
+    monthIndex[key]={
+      month:key,
+      rowCount:rows.length,
+      minDate:dataCoverage(rows).minDate,
+      maxDate:dataCoverage(rows).maxDate,
+      updatedAt:null,
+      uploadedBy:'system-migration',
+      sourceFile:'legacy raw-cache.json'
+    };
+  }
+  if (Object.keys(grouped).length) await writeJsonAtomic(MONTH_INDEX_FILE, monthIndex);
+  return legacy;
+}
+
+function monthStatus(key) {
+  const m=monthIndex[key]||{};
+  return Number(m.rowCount||0) > 0 ? 'DATA' : 'NO DATA';
+}
+
+function monthSlots() {
+  return storageMonthKeys().map(key=>{
+    const m=monthIndex[key]||{};
+    return {
+      month:key,
+      status:monthStatus(key),
+      rowCount:Number(m.rowCount||0),
+      minDate:m.minDate||null,
+      maxDate:m.maxDate||null,
+      updatedAt:m.updatedAt||null,
+      uploadedBy:m.uploadedBy||null,
+      sourceFile:m.sourceFile||null
+    };
+  });
+}
+
 async function bootstrap() {
   config = await readJson(CONFIG_FILE, null);
   if (!config) {
@@ -117,9 +215,14 @@ async function bootstrap() {
     await writeJsonAtomic(CONFIG_FILE, config);
   }
 
-  const cached = await readJson(RAW_CACHE_FILE, []);
-  rawRows = Array.isArray(cached) ? cached : [];
+  await ensureMonthlyFolders();
+  monthIndex = await readJson(MONTH_INDEX_FILE, {});
+  if (!monthIndex || typeof monthIndex !== 'object' || Array.isArray(monthIndex)) monthIndex={};
+  rawRows = await migrateLegacyCacheIfNeeded();
+  if (!rawRows.length) rawRows = await readAllMonthlyRows();
   runtime = await readJson(RUNTIME_FILE, runtime);
+  runtime = { updatedAt:null, sourceFile:null, rowCount:rawRows.length, minDate:null, maxDate:null, uploadHistory:[], ...(runtime||{}) };
+  if (!Array.isArray(runtime.uploadHistory)) runtime.uploadHistory=[];
 
   let users = await readJson(USERS_FILE, null);
   if (!users) {
@@ -278,7 +381,12 @@ function redecorateRow(r) {
 
 async function redecorateAllRows() {
   rawRows = rawRows.map(redecorateRow);
-  if (rawRows.length) await writeJsonAtomic(RAW_CACHE_FILE, rawRows);
+  const grouped={};
+  for (const r of rawRows) {
+    const key=monthKey(r.date);
+    if (monthAllowed(key)) (grouped[key] ||= []).push(r);
+  }
+  for (const [key,rows] of Object.entries(grouped)) await writeMonthRows(key,rows);
 }
 
 function filterBase(filters = {}) {
@@ -449,6 +557,60 @@ function itemQuery(periods, filters, topN) {
   return { topGrowth:summarize(topGrowth), topDecline:summarize(topDecline), totalAll };
 }
 
+
+function jakartaTodayParts() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year:'numeric', month:'2-digit', day:'2-digit'
+  }).formatToParts(new Date()).reduce((a,p)=>{ if (p.type!=='literal') a[p.type]=p.value; return a; }, {});
+  const year=Number(parts.year), month=Number(parts.month), day=Number(parts.day);
+  return { year, month, day, iso:`${parts.year}-${parts.month}-${parts.day}`, monthKey:`${parts.year}-${parts.month}` };
+}
+
+function shiftMonthKey(key, delta) {
+  const [y,m]=String(key).split('-').map(Number);
+  const d=new Date(Date.UTC(y,m-1+delta,1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+}
+
+function monthKeysInRange(start,end) {
+  const out=[];
+  let cur=String(start).slice(0,7);
+  const last=String(end).slice(0,7);
+  let guard=0;
+  while (cur<=last && guard<240) {
+    out.push(cur);
+    cur=shiftMonthKey(cur,1);
+    guard++;
+  }
+  return out;
+}
+
+function uploadPolicy() {
+  const t=jakartaTodayParts();
+  return {
+    timezone:'Asia/Jakarta',
+    today:t.iso,
+    currentMonth:t.monthKey,
+    mode:'MONTHLY_REPLACE_ANYTIME',
+    rule:'Any month from 2026-01 through 2028-12 may be uploaded or replaced at any time. Excel must contain exactly one selected month.'
+  };
+}
+
+function dataCoverage(rows) {
+  let minDate=null,maxDate=null;
+  for (const r of rows) {
+    if (!r.date) continue;
+    if (!minDate || r.date<minDate) minDate=r.date;
+    if (!maxDate || r.date>maxDate) maxDate=r.date;
+  }
+  return {minDate,maxDate};
+}
+
+function appendUploadHistory(entry) {
+  const history=Array.isArray(runtime.uploadHistory)?runtime.uploadHistory:[];
+  runtime.uploadHistory=[entry,...history].slice(0,30);
+}
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
@@ -475,7 +637,7 @@ app.get('/api/meta', requireAuth, (req,res)=>{
   const salesTypes=[...new Set(rawRows.map(r=>r.salesType).filter(Boolean))].sort();
   const stores=[...new Map(config.stores.filter(s=>s.active).map(s=>[s.name,{name:s.name,pt:s.pt}])).values()].sort((a,b)=>a.name.localeCompare(b.name));
   const dates=rawRows.map(r=>r.date).filter(Boolean).sort();
-  res.json({ channels:activeChannels().map(c=>c.name), stores, pts:['EFM','EFIT','ESB'], categories, brands, salesTypes, rankingDefault:config.rankingDefault, runtime, minDate:dates[0]||null, maxDate:dates[dates.length-1]||null });
+  res.json({ channels:activeChannels().map(c=>c.name), stores, pts:['EFM','EFIT','ESB'], categories, brands, salesTypes, rankingDefault:config.rankingDefault, runtime, uploadPolicy:uploadPolicy(), storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH}, monthSlots:monthSlots(), minDate:dates[0]||null, maxDate:dates[dates.length-1]||null });
 });
 
 app.get('/api/meta/products', requireAuth, (req,res)=>{
@@ -513,6 +675,9 @@ app.post('/api/query/items', requireAuth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
+app.get('/api/admin/upload-policy', requireAdmin, (req,res)=>res.json(uploadPolicy()));
+app.get('/api/admin/months', requireAdmin, (req,res)=>res.json({storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH}, months:monthSlots()}));
+
 const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: MAX_UPLOAD_BYTES },
@@ -522,20 +687,87 @@ const upload = multer({
 app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,res)=>{
   if (!req.file) return res.status(400).json({error:'FILE_REQUIRED'});
   try {
-    const wb = XLSX.readFile(req.file.path, { cellDates:true });
-    const sheetName = wb.SheetNames.includes('RAW') ? 'RAW' : wb.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval:null, raw:true });
-    const required = ['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
+    const targetMonth=String(req.body.targetMonth||'').trim();
+    if (!monthAllowed(targetMonth)) throw new Error(`TARGET_MONTH_INVALID. Choose ${STORAGE_START_MONTH} through ${STORAGE_END_MONTH}.`);
+
+    // No monthly closing. Admin may replace any month at any time.
+    // Safety is provided by one-month validation plus upload history/audit metadata.
+    const status=monthStatus(targetMonth);
+
+    const wb=XLSX.readFile(req.file.path,{cellDates:true});
+    const sheetName=wb.SheetNames.includes('RAW')?'RAW':wb.SheetNames[0];
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:null,raw:true});
+
+    const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
     if (!rows.length || !required.every(k=>Object.prototype.hasOwnProperty.call(rows[0],k))) {
       throw new Error(`RAW_FORMAT_INVALID. Required columns: ${required.join(', ')}`);
     }
+
     const normalized=rows.map(normalizeRow).filter(r=>r.date && r.invoice && r.channel);
-    rawRows=normalized;
-    runtime={ updatedAt:new Date().toISOString(), sourceFile:req.file.originalname, rowCount:normalized.length };
-    await Promise.all([writeJsonAtomic(RAW_CACHE_FILE,normalized),writeJsonAtomic(RUNTIME_FILE,runtime)]);
-    res.json({ok:true,...runtime});
+    if (!normalized.length) throw new Error('NO_VALID_ROWS');
+
+    const detectedMonths=[...new Set(normalized.map(r=>monthKey(r.date)))].sort();
+    if (detectedMonths.length!==1 || detectedMonths[0]!==targetMonth) {
+      const err=new Error(`MONTH_MISMATCH. Selected ${targetMonth}, but Excel contains: ${detectedMonths.join(', ')}. Upload one month only.`);
+      err.statusCode=400; throw err;
+    }
+
+    const incomingCoverage=dataCoverage(normalized);
+    const oldMonthRows=await readJson(monthPath(targetMonth),[]);
+    const replacedRows=Array.isArray(oldMonthRows)?oldMonthRows.length:0;
+
+    // Entire selected month partition is replaced. Admin may refresh any historical month at any time.
+    await writeMonthRows(targetMonth, normalized);
+
+    const now=new Date().toISOString();
+    monthIndex[targetMonth]={
+      month:targetMonth,
+      rowCount:normalized.length,
+      minDate:incomingCoverage.minDate,
+      maxDate:incomingCoverage.maxDate,
+      updatedAt:now,
+      uploadedBy:req.user.username,
+      sourceFile:req.file.originalname,
+      fileSize:req.file.size
+    };
+    await writeJsonAtomic(MONTH_INDEX_FILE,monthIndex);
+
+    // Refresh in-memory combined dataset from monthly partitions.
+    rawRows=await readAllMonthlyRows();
+    const coverage=dataCoverage(rawRows);
+
+    const entry={
+      id:crypto.randomUUID(),
+      uploadedAt:now,
+      uploadedBy:req.user.username,
+      sourceFile:req.file.originalname,
+      mode:'monthly_replace',
+      targetMonth,
+      detectedStart:incomingCoverage.minDate,
+      detectedEnd:incomingCoverage.maxDate,
+      incomingRows:normalized.length,
+      replacedRows,
+      totalRows:rawRows.length,
+      monthStatusBefore:status
+    };
+
+    runtime={
+      ...(runtime||{}),updatedAt:now,sourceFile:req.file.originalname,rowCount:rawRows.length,
+      minDate:coverage.minDate,maxDate:coverage.maxDate,lastUpload:entry,
+      uploadHistory:Array.isArray(runtime.uploadHistory)?runtime.uploadHistory:[]
+    };
+    appendUploadHistory(entry);
+    await writeJsonAtomic(RUNTIME_FILE,runtime);
+
+    res.json({
+      ok:true,mode:'monthly_replace',targetMonth,
+      detectedStart:incomingCoverage.minDate,detectedEnd:incomingCoverage.maxDate,
+      incomingRows:normalized.length,replacedRows,rowCount:rawRows.length,
+      minDate:coverage.minDate,maxDate:coverage.maxDate,month:monthIndex[targetMonth],
+      monthSlots:monthSlots()
+    });
   } catch(e) {
-    res.status(400).json({error:e.message});
+    res.status(e.statusCode||400).json({error:e.message});
   } finally {
     fsp.unlink(req.file.path).catch(()=>{});
   }
@@ -626,12 +858,10 @@ app.use(express.static(path.join(ROOT,'public'),{index:false}));
 app.use((err,req,res,next)=>{
   console.error(err);
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error:`FILE_TOO_LARGE. Maximum upload is ${MAX_UPLOAD_MB} MB.` });
-    }
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({error:`FILE_TOO_LARGE. Maximum upload is ${MAX_UPLOAD_MB} MB.`});
     return res.status(400).json({error:err.code});
   }
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT, '0.0.0.0', ()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Monthly closing: disabled`)));

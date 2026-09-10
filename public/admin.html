@@ -3,7 +3,63 @@
 <header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT, target, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
 <main class="admin-page">
 <div class="admin-tabs"><button class="admin-tab active" data-tab="upload">Upload Raw</button><button class="admin-tab" data-tab="channel">Channel</button><button class="admin-tab" data-tab="store">Store / PT</button><button class="admin-tab" data-tab="target">Target</button><button class="admin-tab" data-tab="users">User Management</button></div>
-<section class="admin-panel active" id="tab-upload"><div class="admin-box"><h2>Upload Raw Excel</h2><p>Upload file Excel dari Metabase/manual. File harus memiliki sheet RAW atau sheet pertama dengan kolom transaksi yang sesuai. Data customer pribadi tidak disimpan ke cache dashboard; hanya field yang dibutuhkan untuk reporting.</p><div class="upload-zone"><input id="rawFile" type="file" accept=".xlsx,.xls"><br><button class="btn green" id="uploadRaw">UPLOAD & REPLACE RAW DATA</button><div id="uploadMsg"></div></div><div id="runtimeInfo" style="margin-top:10px;font-size:11px"></div></div></section>
+<section class="admin-panel active" id="tab-upload">
+<div class="admin-box">
+  <h2>Monthly Raw Sales Storage</h2>
+  <p>
+    Data sales disimpan per bulan di persistent storage Railway: <b>/app/data/monthly/YYYY/MM.json</b>.
+    Setiap upload hanya untuk <b>1 bulan</b>. Bulan yang sama dapat diupload ulang kapan saja, termasuk 1, 2, atau beberapa bulan sebelumnya.
+    Upload terbaru akan <b>replace seluruh data pada folder bulan tersebut</b>, sehingga tidak duplicate.
+  </p>
+
+  <div class="upload-policy" id="uploadPolicy">Loading upload policy...</div>
+
+  <div class="form-row upload-controls monthly-controls">
+    <div>
+      <label>Month Folder</label>
+      <select id="targetMonth"></select>
+    </div>
+    <div>
+      <label>Raw Excel — one month only</label>
+      <input id="rawFile" type="file" accept=".xlsx,.xls">
+    </div>
+    <div>
+      <label>Selected File</label>
+      <div id="fileInfo" class="input-like">-</div>
+    </div>
+    <div><button class="btn green" id="uploadRaw">UPLOAD / REPLACE MONTH</button></div>
+  </div>
+
+  <div class="upload-guidance">
+    <b>Contoh:</b> pada 10 September Anda masih dapat upload ulang file <b>Agustus 2026</b>; tiga bulan kemudian pun bulan tersebut tetap dapat diperbarui.
+    Untuk bulan berjalan, misalnya September, upload 1–9 Sep lalu 1–10 Sep dan seterusnya; upload terbaru mengganti data September sebelumnya.
+  </div>
+
+  <div id="uploadMsg"></div>
+  <div id="runtimeInfo" style="margin-top:10px;font-size:11px"></div>
+
+  <h3 class="subhead">Monthly Data Folder — Jan 2026 to Dec 2028</h3>
+  <div class="month-toolbar">
+    <label>Show Year</label>
+    <select id="monthYear"><option>2026</option><option>2027</option><option>2028</option></select>
+    <span class="month-legend"><b class="badge open">DATA</b> available / editable &nbsp; <b class="badge empty">NO DATA</b> not uploaded yet</span>
+  </div>
+  <div class="table-wrap">
+    <table class="admin-table compact-table month-table" id="monthStorageTable">
+      <thead><tr><th>Folder</th><th>Status</th><th>Rows</th><th>Data Coverage</th><th>Last Updated</th><th>Updated By</th><th>Source File</th><th>Action</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <h3 class="subhead">Upload History</h3>
+  <div class="table-wrap">
+    <table class="admin-table compact-table" id="uploadHistoryTable">
+      <thead><tr><th>Uploaded</th><th>User</th><th>Month</th><th>File</th><th>Detected Period</th><th>Incoming Rows</th><th>Replaced Rows</th><th>Total Rows</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+</section>
 <section class="admin-panel" id="tab-channel"><div class="admin-box"><h2>Channel Master</h2><p>Tambah/rename display channel, mapping Raw Value, urutkan, aktif/nonaktifkan channel. Raw Value dicocokkan dengan kolom TELEMED dari raw. Flag Telemed hanya memengaruhi row summary TOTAL TELEMED.</p><div class="table-wrap"><table class="admin-table" id="channelTable"><thead><tr><th>Display Channel</th><th>Raw Value</th><th>Sort</th><th>Active</th><th>Telemed</th><th>Action</th></tr></thead><tbody></tbody></table></div><button class="btn" id="addChannel">+ Add Channel</button><button class="btn green" id="saveChannels">Save Channel Master</button><div id="channelMsg"></div></div></section>
 <section class="admin-panel" id="tab-store"><div class="admin-box"><h2>Store / PT Master</h2><p>Raw Name harus sama dengan store_location pada file raw. Satu display store boleh memiliki lebih dari satu Raw Name. PT yang tersedia: EFM, EFIT, ESB.</p><div class="table-wrap"><table class="admin-table" id="storeTable"><thead><tr><th>Display Store</th><th>Raw Name</th><th>PT</th><th>Active</th><th>Action</th></tr></thead><tbody></tbody></table></div><button class="btn" id="addStore">+ Add Store Mapping</button><button class="btn green" id="saveStores">Save Store / PT Master</button><div id="storeMsg"></div></div></section>
 <section class="admin-panel" id="tab-target"><div class="admin-box"><h2>Target Setup</h2><p>Target Best Est disimpan per bulan dan per channel. Pilih bulan, isi target, lalu Save.</p><div class="form-row"><div><label>Target Month</label><input id="targetMonth" type="month" value="2026-09"></div><div><button class="btn" id="loadTarget">Load Month</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="targetTable"><thead><tr><th>Channel</th><th>Target Best Est</th></tr></thead><tbody></tbody></table></div><button class="btn green" id="saveTarget">Save Target</button><div id="targetMsg"></div></div></section>

@@ -31,8 +31,102 @@ async function saveUser(r){try{const body={displayName:$('.u-name',r).value,role
 async function deleteUser(r){if(!confirm('Delete this user?'))return;try{await api('/api/admin/users/'+r.dataset.id,{method:'DELETE'});await loadUsers();msg('#userMsg','User deleted.')}catch(e){msg('#userMsg',e.message,false)}}
 $('#addUser').onclick=async()=>{try{const body={username:$('#newUsername').value,displayName:$('#newDisplayName').value,password:$('#newPassword').value,role:$('#newRole').value};await api('/api/admin/users',{method:'POST',body:JSON.stringify(body)});$('#newUsername').value=$('#newDisplayName').value=$('#newPassword').value='';await loadUsers();msg('#userMsg','User created.')}catch(e){msg('#userMsg',e.message,false)}};
 
-$('#uploadRaw').onclick=async()=>{const f=$('#rawFile').files[0];if(!f)return msg('#uploadMsg','Choose .xlsx/.xls file first.',false);const fd=new FormData();fd.append('file',f);const b=$('#uploadRaw');b.disabled=true;b.textContent='UPLOADING...';try{const r=await fetch('/api/admin/upload',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Upload failed');msg('#uploadMsg',`Upload success: ${d.rowCount.toLocaleString()} normalized rows.`);META=await api('/api/meta');renderRuntime()}catch(e){msg('#uploadMsg',e.message,false)}finally{b.disabled=false;b.textContent='UPLOAD & REPLACE RAW DATA'}};
-function renderRuntime(){const r=META.runtime||{};$('#runtimeInfo').innerHTML=`<b>Current source:</b> ${esc(r.sourceFile||'-')} &nbsp; | &nbsp; <b>Rows:</b> ${(r.rowCount||0).toLocaleString()} &nbsp; | &nbsp; <b>Updated:</b> ${r.updatedAt?new Date(r.updatedAt).toLocaleString('en-GB'):'-'}`}
+function renderUploadPolicy(){
+  const p=META?.uploadPolicy;if(!p)return;
+  $('#uploadPolicy').innerHTML=
+    `<b>Monthly Storage Policy</b> &nbsp; `+
+    `Tidak ada monthly closing. Admin dapat upload / replace bulan mana pun dari <b>Jan 2026 sampai Dec 2028</b> kapan saja. `+
+    `File Excel harus berisi tepat satu bulan yang sama dengan Month Folder yang dipilih.`;
+}
 
-async function boot(){ME=await api('/api/auth/me');if(ME.role!=='admin')return location.href='/dashboard.html';$('#userChip').textContent=`${ME.displayName||ME.username} • ADMIN`;CFG=await api('/api/admin/config');META=await api('/api/meta');renderChannels();renderStores();renderTarget();renderRuntime();await loadUsers()}
+function monthName(key){
+  const [y,m]=key.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,1)).toLocaleDateString('en-GB',{month:'short',year:'numeric',timeZone:'UTC'});
+}
+
+function initMonthSelect(){
+  const slots=META?.monthSlots||[];
+  const p=META?.uploadPolicy||{};
+  $('#targetMonth').innerHTML=slots.map(s=>`<option value="${s.month}">${monthName(s.month)} — ${s.rowCount?'DATA':'NO DATA'}</option>`).join('');
+  const preferred=slots.find(s=>s.month===p.currentMonth) || slots[0];
+  if(preferred)$('#targetMonth').value=preferred.month;
+}
+
+function renderMonthStorage(){
+  const year=$('#monthYear').value;
+  const slots=(META?.monthSlots||[]).filter(s=>s.month.startsWith(year+'-'));
+  $('#monthStorageTable tbody').innerHTML=slots.map(s=>{
+    const effectiveStatus=s.rowCount?'DATA':'NO DATA';
+    const cls=s.rowCount?'open':'empty';
+    return `<tr>
+      <td><b>${esc(s.month)}</b><br><span class="muted-mini">/app/data/monthly/${esc(s.month.slice(0,4))}/${esc(s.month.slice(5))}.json</span></td>
+      <td class="center"><span class="badge ${cls}">${esc(effectiveStatus)}</span></td>
+      <td class="num">${Number(s.rowCount||0).toLocaleString()}</td>
+      <td>${esc(s.minDate||'-')} → ${esc(s.maxDate||'-')}</td>
+      <td>${s.updatedAt?new Date(s.updatedAt).toLocaleString('en-GB'):'-'}</td>
+      <td>${esc(s.uploadedBy||'-')}</td>
+      <td>${esc(s.sourceFile||'-')}</td>
+      <td><button class="btn select-month" data-month="${s.month}">Select</button></td>
+    </tr>`;
+  }).join('');
+  $$('.select-month').forEach(b=>b.onclick=()=>{
+    $('#targetMonth').value=b.dataset.month;
+    $('#targetMonth').scrollIntoView({behavior:'smooth',block:'center'});
+  });
+}
+
+function renderUploadHistory(){
+  const rows=META?.runtime?.uploadHistory||[];
+  $('#uploadHistoryTable tbody').innerHTML=rows.length?rows.map(x=>`
+    <tr>
+      <td>${x.uploadedAt?new Date(x.uploadedAt).toLocaleString('en-GB'):'-'}</td>
+      <td>${esc(x.uploadedBy||'-')}</td>
+      <td><b>${esc(x.targetMonth||'-')}</b></td>
+      <td>${esc(x.sourceFile||'-')}</td>
+      <td>${esc(x.detectedStart||'-')} → ${esc(x.detectedEnd||'-')}</td>
+      <td class="num">${Number(x.incomingRows||0).toLocaleString()}</td>
+      <td class="num">${Number(x.replacedRows||0).toLocaleString()}</td>
+      <td class="num">${Number(x.totalRows||0).toLocaleString()}</td>
+    </tr>`).join(''):`<tr><td colspan="8" class="center">No upload history yet.</td></tr>`;
+}
+
+$('#monthYear').onchange=renderMonthStorage;
+
+$('#rawFile').onchange=()=>{
+  const f=$('#rawFile').files[0];
+  $('#fileInfo').textContent=f?`${f.name} • ${(f.size/1024/1024).toFixed(1)} MB`:'-';
+};
+
+$('#uploadRaw').onclick=async()=>{
+  const f=$('#rawFile').files[0];
+  if(!f)return msg('#uploadMsg','Choose .xlsx/.xls file first.',false);
+  const targetMonth=$('#targetMonth').value;
+  const ok=confirm(`Upload ${f.name} into folder ${targetMonth}? Existing data for this month will be replaced. This month can be updated again anytime.`);
+  if(!ok)return;
+
+  const fd=new FormData();
+  fd.append('file',f);fd.append('targetMonth',targetMonth);
+  const b=$('#uploadRaw');b.disabled=true;b.textContent='UPLOADING & PROCESSING...';
+  try{
+    const r=await fetch('/api/admin/upload',{method:'POST',body:fd});let d={};try{d=await r.json()}catch{}
+    if(!r.ok){
+      if(r.status===413)throw new Error(d.error||'File exceeds upload limit.');
+      if(String(d.error||'').startsWith('MONTH_MISMATCH'))throw new Error(d.error+' Please export exactly one month from Metabase.');
+      throw new Error(d.error||'Upload failed');
+    }
+    msg('#uploadMsg',`Success: ${d.targetMonth}. ${Number(d.incomingRows||0).toLocaleString()} rows uploaded; ${Number(d.replacedRows||0).toLocaleString()} previous rows replaced. Coverage ${d.detectedStart} → ${d.detectedEnd}.`);
+    META=await api('/api/meta');renderRuntime();renderUploadPolicy();initMonthSelect();renderMonthStorage();renderUploadHistory();
+  }catch(e){msg('#uploadMsg',e.message,false)}finally{b.disabled=false;b.textContent='UPLOAD / REPLACE MONTH'}
+};
+
+function renderRuntime(){
+  const r=META.runtime||{},last=r.lastUpload||{};
+  $('#runtimeInfo').innerHTML=
+    `<b>Overall Data Coverage:</b> ${esc(r.minDate||META.minDate||'-')} → ${esc(r.maxDate||META.maxDate||'-')} &nbsp; | &nbsp; `+
+    `<b>Total Rows:</b> ${(r.rowCount||0).toLocaleString()} &nbsp; | &nbsp; `+
+    `<b>Last Update:</b> ${r.updatedAt?new Date(r.updatedAt).toLocaleString('en-GB'):'-'}`+
+    (last.targetMonth?`<br><b>Last Folder Updated:</b> ${esc(last.targetMonth)} &nbsp; | &nbsp; <b>Source:</b> ${esc(last.sourceFile||'-')}`:'');
+}
+
+async function boot(){ME=await api('/api/auth/me');if(ME.role!=='admin')return location.href='/dashboard.html';$('#userChip').textContent=`${ME.displayName||ME.username} • ADMIN`;CFG=await api('/api/admin/config');META=await api('/api/meta');renderChannels();renderStores();renderTarget();renderRuntime();renderUploadPolicy();initMonthSelect();renderMonthStorage();renderUploadHistory();await loadUsers()}
 boot().catch(e=>console.error(e));
