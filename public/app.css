@@ -237,3 +237,169 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
   .product-option{grid-template-columns:100px 1fr}
   .product-option-brand{display:none}
 }
+
+
+/* ==========================================================
+   v14 — FILTER LAYOUT ONLY
+   Desktop: keep filters in ONE ROW whenever screen width allows.
+   Smaller desktop/tablet: maximum TWO ROWS.
+   No filter logic, query logic, table logic, sorting, export,
+   date logic, or dropdown behavior is changed.
+   ========================================================== */
+
+/* Prevent the generic auto-fit rule from turning each control into a full row. */
+.section-filter{
+  overflow:visible;
+}
+
+.filter-grid{
+  display:grid;
+  align-items:end;
+  gap:7px;
+  width:100%;
+}
+
+/* SECTION 1 — Channel Performance
+   Current | P1 | P2 | Store | Category | Sales Type | Apply */
+#channelFilters .filter-grid{
+  grid-template-columns:
+    minmax(190px,1.35fr)
+    minmax(190px,1.35fr)
+    minmax(190px,1.35fr)
+    minmax(130px,.90fr)
+    minmax(130px,.90fr)
+    minmax(125px,.85fr)
+    minmax(105px,.70fr);
+}
+
+/* SECTION 2 — Actual vs Target
+   Period | Channel | Store | Brand | Sales Type | Apply */
+#targetFilters .filter-grid{
+  grid-template-columns:
+    minmax(200px,1.45fr)
+    minmax(135px,1fr)
+    minmax(135px,1fr)
+    minmax(135px,1fr)
+    minmax(130px,.95fr)
+    minmax(110px,.75fr);
+}
+
+/* SECTION 3 — Store Performance
+   Current | P1 | P2 | PT | Store | Channel | Category |
+   Brand | Sales Type | Item | Apply */
+#storeFilters .filter-grid{
+  grid-template-columns:
+    minmax(175px,1.22fr)
+    minmax(175px,1.22fr)
+    minmax(175px,1.22fr)
+    minmax(82px,.55fr)
+    minmax(120px,.82fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(220px,1.50fr)
+    minmax(100px,.68fr);
+}
+
+/* SECTION 4 — Brand Performance
+   Current | P1 | P2 | Channel | Store | Category | Sales Type | Top | Apply */
+#brandFilters .filter-grid{
+  grid-template-columns:
+    minmax(185px,1.28fr)
+    minmax(185px,1.28fr)
+    minmax(185px,1.28fr)
+    minmax(120px,.82fr)
+    minmax(120px,.82fr)
+    minmax(120px,.82fr)
+    minmax(120px,.82fr)
+    minmax(72px,.50fr)
+    minmax(105px,.70fr);
+}
+
+/* SECTION 5 — Top Items
+   Current | P1 | P2 | Channel | Store | Category | Brand |
+   Sales Type | Item | Top | Apply */
+#itemFilters .filter-grid{
+  grid-template-columns:
+    minmax(175px,1.22fr)
+    minmax(175px,1.22fr)
+    minmax(175px,1.22fr)
+    minmax(105px,.72fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(110px,.76fr)
+    minmax(235px,1.62fr)
+    minmax(70px,.48fr)
+    minmax(100px,.68fr);
+}
+
+/* Item search gets the most usable horizontal space.
+   Its suggestion list is already floating/absolute, so it never
+   changes the filter-row height. */
+#storeFilters .product-picker,
+#itemFilters .product-picker{
+  min-width:0;
+}
+
+#storeFilters .product-suggest,
+#itemFilters .product-suggest{
+  width:min(560px,70vw);
+}
+
+/* Compact controls slightly so a standard 1920px desktop remains one row. */
+#channelFilters .control,
+#targetFilters .control,
+#storeFilters .control,
+#brandFilters .control,
+#itemFilters .control{
+  min-width:0;
+}
+
+#channelFilters .field label,
+#targetFilters .field label,
+#storeFilters .field label,
+#brandFilters .field label,
+#itemFilters .field label{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* 1600px and below:
+   force a 6-column grid. Sections with 11 controls fit in max 2 rows.
+   Item spans 2 columns to remain practical.
+*/
+@media (max-width:1600px){
+  #channelFilters .filter-grid,
+  #targetFilters .filter-grid,
+  #storeFilters .filter-grid,
+  #brandFilters .filter-grid,
+  #itemFilters .filter-grid{
+    grid-template-columns:repeat(6,minmax(135px,1fr));
+  }
+
+  #storeFilters .product-picker,
+  #itemFilters .product-picker{
+    grid-column:span 2;
+  }
+}
+
+/* Very narrow screens keep the same max-two-row composition and scroll
+   horizontally instead of collapsing into 3+ filter rows. */
+@media (max-width:1000px){
+  .section-filter{
+    overflow-x:auto;
+    overflow-y:visible;
+  }
+
+  #channelFilters .filter-grid,
+  #targetFilters .filter-grid,
+  #storeFilters .filter-grid,
+  #brandFilters .filter-grid,
+  #itemFilters .filter-grid{
+    min-width:980px;
+    grid-template-columns:repeat(6,minmax(145px,1fr));
+  }
+}
