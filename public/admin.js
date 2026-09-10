@@ -1,0 +1,38 @@
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});if(r.status===401){location.href='/login.html';throw new Error('Unauthorized')}if(r.status===403){location.href='/dashboard.html';throw new Error('Forbidden')}const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d};
+let CFG=null,USERS=[],ME=null,META=null;
+function msg(id,text,ok=true){const el=$(id);el.className=ok?'success':'error';el.textContent=text;setTimeout(()=>el.className='',4500)}
+
+$$('.admin-tab').forEach(b=>b.onclick=()=>{$$('.admin-tab').forEach(x=>x.classList.remove('active'));$$('.admin-panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#tab-'+b.dataset.tab).classList.add('active')});
+$('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
+
+function channelRow(c={name:'',rawName:'',sort:99,active:true,telemed:false}){return `<tr><td><input class="ch-name" value="${esc(c.name)}"></td><td><input class="ch-raw" value="${esc(c.rawName||c.name)}"></td><td><input class="ch-sort" type="number" value="${Number(c.sort||99)}"></td><td class="center"><input class="ch-active" type="checkbox" ${c.active?'checked':''}></td><td class="center"><input class="ch-telemed" type="checkbox" ${c.telemed?'checked':''}></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`}
+function renderChannels(){$('#channelTable tbody').innerHTML=CFG.channels.map(channelRow).join('');bindRemove()}
+function collectChannels(){return $$('#channelTable tbody tr').map(r=>({name:$('.ch-name',r).value,rawName:$('.ch-raw',r).value,sort:Number($('.ch-sort',r).value||99),active:$('.ch-active',r).checked,telemed:$('.ch-telemed',r).checked}))}
+$('#addChannel').onclick=()=>{$('#channelTable tbody').insertAdjacentHTML('beforeend',channelRow());bindRemove()};
+$('#saveChannels').onclick=async()=>{try{CFG.channels=collectChannels();await saveConfig();msg('#channelMsg','Channel master saved.')}catch(e){msg('#channelMsg',e.message,false)}};
+
+function storeRow(s={name:'',rawName:'',pt:'EFM',active:true}){return `<tr><td><input class="st-name" value="${esc(s.name)}"></td><td><input class="st-raw" value="${esc(s.rawName)}"></td><td><select class="st-pt"><option ${s.pt==='EFM'?'selected':''}>EFM</option><option ${s.pt==='EFIT'?'selected':''}>EFIT</option><option ${s.pt==='ESB'?'selected':''}>ESB</option></select></td><td class="center"><input class="st-active" type="checkbox" ${s.active?'checked':''}></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`}
+function renderStores(){$('#storeTable tbody').innerHTML=CFG.stores.map(storeRow).join('');bindRemove()}
+function collectStores(){return $$('#storeTable tbody tr').map(r=>({name:$('.st-name',r).value,rawName:$('.st-raw',r).value,pt:$('.st-pt',r).value,active:$('.st-active',r).checked}))}
+$('#addStore').onclick=()=>{$('#storeTable tbody').insertAdjacentHTML('beforeend',storeRow());bindRemove()};
+$('#saveStores').onclick=async()=>{try{CFG.stores=collectStores();await saveConfig();msg('#storeMsg','Store / PT master saved.')}catch(e){msg('#storeMsg',e.message,false)}};
+function bindRemove(){$$('.remove-row').forEach(b=>b.onclick=()=>b.closest('tr').remove())}
+async function saveConfig(){const d=await api('/api/admin/config',{method:'PUT',body:JSON.stringify(CFG)});CFG=d.config;return d}
+
+function renderTarget(){const month=$('#targetMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
+$('#loadTarget').onclick=renderTarget;
+$('#saveTarget').onclick=async()=>{try{const month=$('#targetMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
+
+async function loadUsers(){USERS=await api('/api/admin/users');renderUsers()}
+function renderUsers(){$('#userTable tbody').innerHTML=USERS.map(u=>`<tr data-id="${u.id}"><td>${esc(u.username)}</td><td><input class="u-name" value="${esc(u.displayName||u.username)}"></td><td><select class="u-role"><option value="guest" ${u.role==='guest'?'selected':''}>Guest</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td><td class="center"><input class="u-active" type="checkbox" ${u.active?'checked':''}></td><td><input class="u-pass" type="password" placeholder="Leave blank"></td><td class="action-cell"><button class="btn save-user">Save</button> <button class="btn red delete-user">Delete</button></td></tr>`).join('');$$('.save-user').forEach(b=>b.onclick=()=>saveUser(b.closest('tr')));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.closest('tr')))}
+async function saveUser(r){try{const body={displayName:$('.u-name',r).value,role:$('.u-role',r).value,active:$('.u-active',r).checked};if($('.u-pass',r).value)body.password=$('.u-pass',r).value;await api('/api/admin/users/'+r.dataset.id,{method:'PUT',body:JSON.stringify(body)});await loadUsers();msg('#userMsg','User updated.')}catch(e){msg('#userMsg',e.message,false)}}
+async function deleteUser(r){if(!confirm('Delete this user?'))return;try{await api('/api/admin/users/'+r.dataset.id,{method:'DELETE'});await loadUsers();msg('#userMsg','User deleted.')}catch(e){msg('#userMsg',e.message,false)}}
+$('#addUser').onclick=async()=>{try{const body={username:$('#newUsername').value,displayName:$('#newDisplayName').value,password:$('#newPassword').value,role:$('#newRole').value};await api('/api/admin/users',{method:'POST',body:JSON.stringify(body)});$('#newUsername').value=$('#newDisplayName').value=$('#newPassword').value='';await loadUsers();msg('#userMsg','User created.')}catch(e){msg('#userMsg',e.message,false)}};
+
+$('#uploadRaw').onclick=async()=>{const f=$('#rawFile').files[0];if(!f)return msg('#uploadMsg','Choose .xlsx/.xls file first.',false);const fd=new FormData();fd.append('file',f);const b=$('#uploadRaw');b.disabled=true;b.textContent='UPLOADING...';try{const r=await fetch('/api/admin/upload',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Upload failed');msg('#uploadMsg',`Upload success: ${d.rowCount.toLocaleString()} normalized rows.`);META=await api('/api/meta');renderRuntime()}catch(e){msg('#uploadMsg',e.message,false)}finally{b.disabled=false;b.textContent='UPLOAD & REPLACE RAW DATA'}};
+function renderRuntime(){const r=META.runtime||{};$('#runtimeInfo').innerHTML=`<b>Current source:</b> ${esc(r.sourceFile||'-')} &nbsp; | &nbsp; <b>Rows:</b> ${(r.rowCount||0).toLocaleString()} &nbsp; | &nbsp; <b>Updated:</b> ${r.updatedAt?new Date(r.updatedAt).toLocaleString('en-GB'):'-'}`}
+
+async function boot(){ME=await api('/api/auth/me');if(ME.role!=='admin')return location.href='/dashboard.html';$('#userChip').textContent=`${ME.displayName||ME.username} • ADMIN`;CFG=await api('/api/admin/config');META=await api('/api/meta');renderChannels();renderStores();renderTarget();renderRuntime();await loadUsers()}
+boot().catch(e=>console.error(e));

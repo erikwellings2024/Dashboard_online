@@ -1,0 +1,21 @@
+services:
+  sales-dashboard:
+    build: .
+    container_name: sales-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      JWT_SECRET: ${JWT_SECRET}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
+      INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME}
+      INITIAL_GUEST_USERNAME: ${INITIAL_GUEST_USERNAME}
+      INITIAL_GUEST_PASSWORD: ${INITIAL_GUEST_PASSWORD}
+      INITIAL_GUEST_NAME: ${INITIAL_GUEST_NAME}
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads

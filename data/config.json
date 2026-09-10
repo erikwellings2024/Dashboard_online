@@ -1,0 +1,223 @@
+{
+  "channels": [
+    {
+      "name": "HALODOC",
+      "active": true,
+      "telemed": true,
+      "sort": 1,
+      "rawName": "HALODOC"
+    },
+    {
+      "name": "GRABMART",
+      "active": true,
+      "telemed": true,
+      "sort": 2,
+      "rawName": "GRABMART"
+    },
+    {
+      "name": "GOOD DOCTOR",
+      "active": true,
+      "telemed": true,
+      "sort": 3,
+      "rawName": "GOOD DOCTOR"
+    },
+    {
+      "name": "SHOPEE",
+      "active": true,
+      "telemed": true,
+      "sort": 4,
+      "rawName": "SHOPEE"
+    },
+    {
+      "name": "LAZADA",
+      "active": true,
+      "telemed": true,
+      "sort": 5,
+      "rawName": "LAZADA"
+    },
+    {
+      "name": "WEBSITE",
+      "active": true,
+      "telemed": true,
+      "sort": 6,
+      "rawName": "WEBSITE"
+    },
+    {
+      "name": "WHATSAPP",
+      "active": true,
+      "telemed": true,
+      "sort": 7,
+      "rawName": "WHATSAPP"
+    },
+    {
+      "name": "OFFLINE SALES",
+      "active": true,
+      "telemed": false,
+      "sort": 8,
+      "rawName": "OFFLINE SALES"
+    }
+  ],
+  "stores": [
+    {
+      "name": "BINTARO",
+      "rawName": "Apotek Wellings Bintaro",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "CIRENDEU",
+      "rawName": "Apotek Wellings Cirendeu",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "CITRA GARDEN",
+      "rawName": "Apotek Wellings Citra Garden",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "CONDET RAYA",
+      "rawName": "Apotek Wellings Condet Raya",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "DAAN MOGOT",
+      "rawName": "Apotek Wellings Daan Mogot Baru",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "DUTA MAS",
+      "rawName": "Apotek Wellings Duta Mas",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "GREEN LAKE",
+      "rawName": "Apotek Wellings Green Lake",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "GREENVILLE",
+      "rawName": "Apotek Wellings Greenville",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "HARAPAN INDAH",
+      "rawName": "Apotek Wellings Harapan Indah",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "JELAMBAR BARU",
+      "rawName": "Apotek Wellings Jelambar Baru",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "KELAPA GADING",
+      "rawName": "Apotek Wellings Kelapa Gading",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "MERUYA UTARA",
+      "rawName": "Apotek Wellings Meruya Utara",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "PADEMANGAN",
+      "rawName": "Apotek Wellings Pademangan",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "PURI PARKVIEW",
+      "rawName": "Apotek Wellings Puri Parkview",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "PIK",
+      "rawName": "Apotek Wellings PIK",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "PIK2",
+      "rawName": "Apotek Wellings PIK 2",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "RAYA TENGAH",
+      "rawName": "Apotek Wellings Raya Tengah",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "REMPOA",
+      "rawName": "Apotek Wellings Rempoa",
+      "pt": "EFIT",
+      "active": true
+    },
+    {
+      "name": "SUNTER",
+      "rawName": "Apotek Wellings Sunter",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "TEBET",
+      "rawName": "Apotek Wellings Tebet",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "TELUK GONG",
+      "rawName": "Apotek Wellings Teluk Gong",
+      "pt": "EFM",
+      "active": true
+    },
+    {
+      "name": "VETERAN",
+      "rawName": "Apotek Wellings Veteran",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "VETERAN",
+      "rawName": "SLOC Shopee Veteran",
+      "pt": "ESB",
+      "active": true
+    },
+    {
+      "name": "PIK",
+      "rawName": "SLOC Shopee PIK",
+      "pt": "EFM",
+      "active": true
+    }
+  ],
+  "categoryMap": {
+    "VOUCHER PARTNERSHIP": "OTHER",
+    "OTHER MARKETING": "OTHER"
+  },
+  "targets": {
+    "2026-09": {
+      "HALODOC": 651066376,
+      "GRABMART": 145734722,
+      "GOOD DOCTOR": 152118341,
+      "SHOPEE": 820466719,
+      "LAZADA": 151200000,
+      "WEBSITE": 9000000,
+      "WHATSAPP": 0,
+      "OFFLINE SALES": 6665057948
+    }
+  },
+  "rankingDefault": 10
+}
