@@ -4,12 +4,16 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelect
 const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});if(r.status===401){location.href='/login.html';throw new Error('Unauthorized')}const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d};
 const fmt=n=>n===null||n===undefined||!Number.isFinite(Number(n))?'-':Math.round(Number(n)).toLocaleString('en-US');
 const fp=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'-':`${v>=0&&v!==0?'+':''}${(Number(v)*100).toFixed(1)}%`;
-const dateLabel=iso=>new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+// Calendar dates are date-only values. Never convert them through UTC/toISOString(),
+// because users in GMT+7 can lose one day on each conversion.
+const localISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseISO=iso=>{const [y,m,d]=String(iso).split('-').map(Number);return new Date(y,m-1,d)};
+const dateLabel=iso=>parseISO(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 const rangeLabel=p=>`${dateLabel(p.start)} - ${dateLabel(p.end)}`;
 const clone=o=>JSON.parse(JSON.stringify(o));
 
-function monthRange(iso,offset=0){const d=new Date(`${iso}T00:00:00`);d.setMonth(d.getMonth()+offset);const y=d.getFullYear(),m=d.getMonth();const a=new Date(y,m,1),b=new Date(y,m+1,0);const z=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;return{start:z(a),end:z(b)}}
-function defaultPeriods(){const max=META.maxDate||new Date().toISOString().slice(0,10);const current={start:max.slice(0,8)+'01',end:max};return[current,monthRange(max,-1),monthRange(max,-2)]}
+function monthRange(iso,offset=0){const d=parseISO(iso);d.setMonth(d.getMonth()+offset);const y=d.getFullYear(),m=d.getMonth();const a=new Date(y,m,1),b=new Date(y,m+1,0);return{start:localISO(a),end:localISO(b)}}
+function defaultPeriods(){const today=localISO(new Date());const max=META.maxDate||today;const current={start:max.slice(0,8)+'01',end:max};return[current,monthRange(max,-1),monthRange(max,-2)]}
 function all(arr,key){return arr.map(x=>key?x[key]:x)}
 
 function initState(){const p=defaultPeriods();const common={stores:all(META.stores,'name'),categories:clone(META.categories),brands:clone(META.brands),salesTypes:clone(META.salesTypes),channels:clone(META.channels)};
@@ -48,9 +52,91 @@ function syncMulti(f){const sec=f.dataset.section,key=f.dataset.key;const values
 
 document.addEventListener('click',e=>{$$('.multi.open,.range.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')});$$('.download-wrap.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')})});
 
-function setupRange(f){const sec=f.dataset.section,key=f.dataset.key;let p=key==='period'?S[sec].period:S[sec].periods[Number(key.slice(1))];let temp=null;let view=new Date(`${p.start}T00:00:00`);const btn=$('.control',f),pop=$('.range-pop',f),months=$('.months',f),hint=$('.hint',f),selected=$('.selected',f);const same=(a,b)=>a&&b&&a.toISOString().slice(0,10)===b.toISOString().slice(0,10);const inRange=(d,a,b)=>a&&b&&d>=a&&d<=b;
-function render(){const one=m=>{const y=m.getFullYear(),mo=m.getMonth(),first=new Date(y,mo,1),grid=new Date(y,mo,1-first.getDay());let h=`<div class="month"><div class="month-title">${m.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</div><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div><div class="days">`;for(let i=0;i<42;i++){const d=new Date(grid);d.setDate(grid.getDate()+i);const iso=d.toISOString().slice(0,10);let c='day';if(d.getMonth()!==mo)c+=' muted';const a=new Date(`${p.start}T00:00:00`),b=new Date(`${p.end}T00:00:00`);if(!temp&&inRange(d,a,b))c+=' inrange';if(same(d,temp||a))c+=' start';if(!temp&&same(d,b))c+=' end';h+=`<button class="${c}" data-date="${iso}" type="button">${d.getDate()}</button>`}return h+'</div></div>'};const next=new Date(view.getFullYear(),view.getMonth()+1,1);months.innerHTML=one(view)+one(next);$$('.day',months).forEach(d=>d.onclick=e=>{e.stopPropagation();const click=new Date(`${d.dataset.date}T00:00:00`);if(!temp){temp=click;hint.textContent='Now click end date';selected.textContent='Start: '+dateLabel(d.dataset.date)}else{let a=temp,b=click;if(b<a)[a,b]=[b,a];p={start:a.toISOString().slice(0,10),end:b.toISOString().slice(0,10)};if(key==='period')S[sec].period=p;else S[sec].periods[Number(key.slice(1))]=p;temp=null;btn.firstElementChild.textContent=rangeLabel(p);selected.textContent=rangeLabel(p);hint.textContent='Click start, then end'}render()})}
-btn.onclick=e=>{e.stopPropagation();$$('.multi.open,.range.open').forEach(x=>x!==f&&x.classList.remove('open'));f.classList.toggle('open')};$('.prev',f).onclick=e=>{e.stopPropagation();view=new Date(view.getFullYear(),view.getMonth()-1,1);render()};$('.next',f).onclick=e=>{e.stopPropagation();view=new Date(view.getFullYear(),view.getMonth()+1,1);render()};$('.clear',f).onclick=e=>{e.stopPropagation();temp=null};render()}
+function setupRange(f){
+  const sec=f.dataset.section,key=f.dataset.key;
+  let p=key==='period'?S[sec].period:S[sec].periods[Number(key.slice(1))];
+  let temp=null;
+  let view=parseISO(p.start);
+  const btn=$('.control',f),pop=$('.range-pop',f),months=$('.months',f),hint=$('.hint',f),selected=$('.selected',f);
+
+  const same=(a,b)=>a&&b&&localISO(a)===localISO(b);
+  const inRange=(d,a,b)=>a&&b&&d>=a&&d<=b;
+
+  function render(){
+    const one=m=>{
+      const y=m.getFullYear(),mo=m.getMonth();
+      const first=new Date(y,mo,1);
+      const grid=new Date(y,mo,1-first.getDay());
+      let h=`<div class="month"><div class="month-title">${m.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</div><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div><div class="days">`;
+
+      for(let i=0;i<42;i++){
+        const d=new Date(grid.getFullYear(),grid.getMonth(),grid.getDate()+i);
+        const iso=localISO(d);
+        let c='day';
+        if(d.getMonth()!==mo)c+=' muted';
+
+        const a=parseISO(p.start),b=parseISO(p.end);
+        if(!temp&&inRange(d,a,b))c+=' inrange';
+        if(same(d,temp||a))c+=' start';
+        if(!temp&&same(d,b))c+=' end';
+
+        h+=`<button class="${c}" data-date="${iso}" type="button">${d.getDate()}</button>`;
+      }
+      return h+'</div></div>';
+    };
+
+    const next=new Date(view.getFullYear(),view.getMonth()+1,1);
+    months.innerHTML=one(view)+one(next);
+
+    $$('.day',months).forEach(dayBtn=>dayBtn.onclick=e=>{
+      e.stopPropagation();
+      const click=parseISO(dayBtn.dataset.date);
+
+      if(!temp){
+        temp=click;
+        hint.textContent='Now click end date';
+        selected.textContent='Start: '+dateLabel(dayBtn.dataset.date);
+      }else{
+        let a=temp,b=click;
+        if(b<a)[a,b]=[b,a];
+
+        p={start:localISO(a),end:localISO(b)};
+        if(key==='period')S[sec].period=p;
+        else S[sec].periods[Number(key.slice(1))]=p;
+
+        temp=null;
+        btn.firstElementChild.textContent=rangeLabel(p);
+        selected.textContent=rangeLabel(p);
+        hint.textContent='Click start, then end';
+      }
+      render();
+    });
+  }
+
+  btn.onclick=e=>{
+    e.stopPropagation();
+    $$('.multi.open,.range.open').forEach(x=>x!==f&&x.classList.remove('open'));
+    f.classList.toggle('open');
+  };
+  $('.prev',f).onclick=e=>{
+    e.stopPropagation();
+    view=new Date(view.getFullYear(),view.getMonth()-1,1);
+    render();
+  };
+  $('.next',f).onclick=e=>{
+    e.stopPropagation();
+    view=new Date(view.getFullYear(),view.getMonth()+1,1);
+    render();
+  };
+  $('.clear',f).onclick=e=>{
+    e.stopPropagation();
+    temp=null;
+    hint.textContent='Click start, then end';
+    selected.textContent=rangeLabel(p);
+    render();
+  };
+  render();
+}
 
 function periodsFor(sec){const x=S[sec];return x.periods.slice(0,1+x.prevCount)}
 function reqFilters(sec){return clone(S[sec].filters)}
