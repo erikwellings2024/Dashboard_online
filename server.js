@@ -338,9 +338,28 @@ function activeChannels() {
   return config.channels.filter(c => c.active).sort((a,b) => (a.sort || 999) - (b.sort || 999));
 }
 
+function normalizeRawChannel(r) {
+  // Current Metabase export uses `telemed_check`.
+  // Keep backward compatibility with older dashboard/raw column names.
+  let raw = String(
+    r.telemed_check ||
+    r.TELEMED ||
+    r.telemed ||
+    r.channel_dashboard ||
+    r.channel_type ||
+    ''
+  ).trim().toUpperCase();
+
+  // In the raw sales export, WALK-IN / IN STORE is the offline channel.
+  if (['WALK-IN', 'WALK IN', 'IN STORE', 'IN-STORE', 'OFFLINE'].includes(raw)) {
+    raw = 'OFFLINE SALES';
+  }
+  return raw;
+}
+
 function normalizeRow(r) {
   const rawStore = String(r.store_location || '').trim();
-  const rawChannel = String(r.TELEMED || r.telemed || r.channel_dashboard || '').trim().toUpperCase();
+  const rawChannel = normalizeRawChannel(r);
   const store = canonicalStore(rawStore);
   return {
     date: excelDateToISO(r.transaction_date || r.DATE),
@@ -699,12 +718,28 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:null,raw:true});
 
     const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
-    if (!rows.length || !required.every(k=>Object.prototype.hasOwnProperty.call(rows[0],k))) {
-      throw new Error(`RAW_FORMAT_INVALID. Required columns: ${required.join(', ')}`);
+    const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
+    const hasRequired = rows.length && required.every(k=>Object.prototype.hasOwnProperty.call(rows[0],k));
+    const hasChannelColumn = rows.length && channelColumns.some(k=>Object.prototype.hasOwnProperty.call(rows[0],k));
+    if (!hasRequired || !hasChannelColumn) {
+      throw new Error(
+        `RAW_FORMAT_INVALID. Required columns: ${required.join(', ')}. ` +
+        `Channel column: one of ${channelColumns.join(', ')}`
+      );
     }
 
-    const normalized=rows.map(normalizeRow).filter(r=>r.date && r.invoice && r.channel);
-    if (!normalized.length) throw new Error('NO_VALID_ROWS');
+    const normalizedAll=rows.map(normalizeRow);
+    const normalized=normalizedAll.filter(r=>r.date && r.invoice && r.channel);
+    if (!normalized.length) {
+      const dateOk=normalizedAll.filter(r=>r.date).length;
+      const invoiceOk=normalizedAll.filter(r=>r.invoice).length;
+      const channelOk=normalizedAll.filter(r=>r.channel).length;
+      throw new Error(`NO_VALID_ROWS. Parsed rows=${rows.length}, valid dates=${dateOk}, invoices=${invoiceOk}, channels=${channelOk}`);
+    }
+
+    const channelSummary={};
+    for (const r of normalized) channelSummary[r.channel]=(channelSummary[r.channel]||0)+1;
+    console.log(`[UPLOAD] user=${req.user.username} target=${targetMonth} file=${req.file.originalname} rawRows=${rows.length} validRows=${normalized.length} channels=${JSON.stringify(channelSummary)}`);
 
     const detectedMonths=[...new Set(normalized.map(r=>monthKey(r.date)))].sort();
     if (detectedMonths.length!==1 || detectedMonths[0]!==targetMonth) {
