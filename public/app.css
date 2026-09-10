@@ -90,3 +90,150 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 @media(max-width:1450px){
   .filter-grid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}
 }
+
+
+/* Period simplification v10 */
+.previous2-wrap{position:relative}
+.previous2-wrap>.range{margin:0}
+.mini-hide{
+  margin-top:4px;
+  border:1px solid #b9c4ce;
+  background:#fff;
+  color:#53606b;
+  height:22px;
+  padding:0 8px;
+  font:700 9px Arial,Helvetica,sans-serif;
+  cursor:pointer;
+}
+.mini-hide:hover{background:#f4f6f8;color:#222}
+.previous2-blank .control{justify-content:space-between;color:#687480;background:#f8fafb}
+.previous2-blank .control:hover{background:#eef3f6}
+
+.day.unavailable,
+.day:disabled{
+  color:#bcc4cb!important;
+  background:#f7f8f9!important;
+  cursor:not-allowed!important;
+  opacity:.55;
+  text-decoration:none;
+}
+.cal-head .next:disabled{
+  opacity:.35;
+  cursor:not-allowed;
+}
+
+/* Latest raw-data indicator */
+.update-chip{
+  white-space:nowrap;
+  font-size:11px;
+  font-weight:700;
+}
+
+
+/* v12: Previous 2 hide action lives inside the calendar footer */
+.cal-foot{align-items:center}
+.cal-actions{display:flex;align-items:center;gap:6px;margin-left:auto}
+.cal-actions .mini-hide,
+.cal-actions .clear{
+  margin:0;
+  height:24px;
+  padding:0 8px;
+  border:1px solid #b9c4ce;
+  background:#fff;
+  font:700 9px Arial,Helvetica,sans-serif;
+  cursor:pointer;
+}
+.cal-actions .mini-hide{color:#6b4f00;background:#fffaf0}
+.cal-actions .mini-hide:hover{background:#fff2cc}
+.cal-actions .clear:hover{background:#f4f6f8}
+
+
+/* v13: single-select Item (SKU / Name) autocomplete, pivot-style */
+.product-picker{position:relative;z-index:40}
+.product-input-wrap{position:relative}
+.product-picker .product-input{
+  display:block;
+  padding-right:28px;
+  cursor:text;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.product-clear{
+  position:absolute;
+  top:50%;
+  right:6px;
+  transform:translateY(-50%);
+  width:20px;
+  height:20px;
+  border:0;
+  background:transparent;
+  color:#66727d;
+  font:700 16px/20px Arial,Helvetica,sans-serif;
+  cursor:pointer;
+}
+.product-clear:hover{color:#b42318}
+.product-suggest{
+  display:none;
+  position:absolute;
+  top:calc(100% + 4px);
+  left:0;
+  width:min(560px,70vw);
+  min-width:380px;
+  max-height:330px;
+  overflow:auto;
+  background:#fff;
+  border:1px solid #9da8b2;
+  box-shadow:0 12px 28px rgba(16,24,40,.16);
+  z-index:300;
+}
+.product-picker.open .product-suggest{display:block}
+.product-suggest-info{
+  position:sticky;
+  top:0;
+  z-index:2;
+  padding:7px 9px;
+  background:#f4f7f8;
+  border-bottom:1px solid #d5dce2;
+  color:#5c6873;
+  font:700 10px Arial,Helvetica,sans-serif;
+}
+.product-options{background:#fff}
+.product-option{
+  width:100%;
+  display:grid;
+  grid-template-columns:120px minmax(220px,1fr) 110px;
+  gap:8px;
+  align-items:center;
+  border:0;
+  border-bottom:1px solid #e4e8eb;
+  background:#fff;
+  padding:7px 9px;
+  text-align:left;
+  cursor:pointer;
+  color:#1f2933;
+}
+.product-option:hover,.product-option:focus{background:#eef6f0;outline:none}
+.product-option-sku{
+  font:700 11px Arial,Helvetica,sans-serif;
+  white-space:nowrap;
+}
+.product-option-name{
+  font:11px Arial,Helvetica,sans-serif;
+  white-space:normal;
+  line-height:1.25;
+}
+.product-option-brand{
+  font:10px Arial,Helvetica,sans-serif;
+  color:#65717c;
+  text-align:right;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.product-error{padding:10px;color:#b42318;font-size:10px}
+@media(max-width:700px){
+  .product-suggest{min-width:0;width:90vw}
+  .product-option{grid-template-columns:100px 1fr}
+  .product-option-brand{display:none}
+}

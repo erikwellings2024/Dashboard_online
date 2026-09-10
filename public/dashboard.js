@@ -20,21 +20,38 @@ function all(arr,key){return arr.map(x=>key?x[key]:x)}
 function initState(){const p=defaultPeriods();const common={stores:all(META.stores,'name'),categories:clone(META.categories),brands:clone(META.brands),salesTypes:clone(META.salesTypes),channels:clone(META.channels)};
 S.channel={periods:clone(p),prevCount:2,filters:{stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
 S.target={period:clone(p[0]),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
-S.store={periods:clone(p),prevCount:2,product:'',filters:{pts:['EFM','EFIT','ESB'],stores:clone(common.stores),channels:clone(common.channels),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
+S.store={periods:clone(p),prevCount:2,product:'',productLabel:'',filters:{pts:['EFM','EFIT','ESB'],stores:clone(common.stores),channels:clone(common.channels),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
 S.brand={periods:clone(p),prevCount:2,topN:Math.min(10,META.rankingDefault||10),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes)}};
-S.item={periods:clone(p),prevCount:2,topN:Math.min(10,META.rankingDefault||10),product:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
+S.item={periods:clone(p),prevCount:2,topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes)}};
 }
 
-function rangeControl(section,key,label,period){return `<div class="field range" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span>${rangeLabel(period)}</span><span>▾</span></button><div class="range-pop"><div class="cal-head"><button class="prev">‹</button><b class="hint">Click start, then end</b><button class="next">›</button></div><div class="months"></div><div class="cal-foot"><span class="selected">${rangeLabel(period)}</span><button class="clear" type="button">Clear</button></div></div></div>`}
+function rangeControl(section,key,label,period){
+  const hideP2=key==='p2'?`<button class="mini-hide prev2-hide" data-section="${section}" type="button">BLANK / HIDE</button>`:'';
+  return `<div class="field range" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span>${rangeLabel(period)}</span><span>▾</span></button><div class="range-pop"><div class="cal-head"><button class="prev">‹</button><b class="hint">Click start, then end</b><button class="next">›</button></div><div class="months"></div><div class="cal-foot"><span class="selected">${rangeLabel(period)}</span><div class="cal-actions">${hideP2}<button class="clear" type="button">Clear</button></div></div></div>`}
 function previous2Control(section,period,visible){
   if(!visible){
     return `<div class="field previous2-blank"><label>Previous 2</label><button class="control prev2-show" data-section="${section}" type="button"><span>BLANK / HIDDEN</span><span>＋</span></button></div>`;
   }
-  return `<div class="field previous2-wrap">${rangeControl(section,'p2','Previous 2',period)}<button class="mini-hide prev2-hide" data-section="${section}" type="button">BLANK / HIDE</button></div>`;
+  return rangeControl(section,'p2','Previous 2',period);
 }
 function prevCountControl(section,val){return `<div class="field"><label>Previous Period</label><select class="control prev-count" data-section="${section}"><option value="1" ${val===1?'selected':''}>1 Previous Period</option><option value="2" ${val===2?'selected':''}>2 Previous Periods</option></select></div>`}
 function multiControl(section,key,label,options,selected,search=false){const set=new Set(selected);return `<div class="field multi" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span class="multi-label">${set.size===options.length?'All '+label:set.size+' Selected'}</span><span>▾</span></button><div class="drop">${search?'<input class="search-input" placeholder="Search...">':''}<label class="check"><input type="checkbox" class="toggle-all" ${set.size===options.length?'checked':''}>Select All</label>${options.map(o=>{const v=typeof o==='string'?o:o.name;return `<label class="check option"><input type="checkbox" value="${esc(v)}" ${set.has(v)?'checked':''}>${esc(v)}</label>`}).join('')}</div></div>`}
 function selectControl(section,key,label,values,val){return `<div class="field"><label>${label}</label><select class="control simple-select" data-section="${section}" data-key="${key}">${values.map(v=>`<option value="${v}" ${String(v)===String(val)?'selected':''}>${v}</option>`).join('')}</select></div>`}
+function productPicker(section,label){
+  const state=S[section];
+  const display=state.productLabel||state.product||'';
+  return `<div class="field product-picker" data-section="${section}">
+    <label>${label}</label>
+    <div class="product-input-wrap">
+      <input class="control product-input" autocomplete="off" value="${esc(display)}" placeholder="Type SKU or item name">
+      <button class="product-clear ${display?'':'hidden'}" type="button" title="Clear item">×</button>
+    </div>
+    <div class="product-suggest">
+      <div class="product-suggest-info">Ketik minimal 2 karakter SKU atau nama item</div>
+      <div class="product-options"></div>
+    </div>
+  </div>`;
+}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
 function renderFilters(){
@@ -46,24 +63,132 @@ function renderFilters(){
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
-  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${rangeControl('store','p1','Previous 1',st.periods[1])}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}<div class="field"><label>Item (SKU / Name)</label><input class="control product-input" data-section="store" value="${esc(st.product)}" placeholder="Type SKU or product name"></div><button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>PT:</b> ${st.filters.pts.join(', ')}</span></div>`;
+  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${rangeControl('store','p1','Previous 1',st.periods[1])}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>PT:</b> ${st.filters.pts.join(', ')}</span></div>`;
 
   const b=S.brand;
   $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${rangeControl('brand','p1','Previous 1',b.periods[1])}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div>`;
 
   const it=S.item;
-  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}<div class="field"><label>Product (SKU / Name)</label><input class="control product-input" data-section="item" value="${esc(it.product)}" placeholder="Type SKU or product name"></div>${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],it.topN)}<button class="apply" data-apply="item">APPLY</button></div>`;
+  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],it.topN)}<button class="apply" data-apply="item">APPLY</button></div>`;
 
   bindFilters();
 }
 
 function bindFilters(){
-$$('.multi .control').forEach(btn=>btn.onclick=e=>{e.stopPropagation();const f=btn.closest('.multi');$$('.multi.open,.range.open').forEach(x=>x!==f&&x.classList.remove('open'));f.classList.toggle('open')});
+$$('.multi .control').forEach(btn=>btn.onclick=e=>{e.stopPropagation();const f=btn.closest('.multi');$$('.multi.open,.range.open,.product-picker.open').forEach(x=>x!==f&&x.classList.remove('open'));f.classList.toggle('open')});
 $$('.toggle-all').forEach(cb=>cb.onchange=()=>{const f=cb.closest('.multi');$$('.option input',f).forEach(x=>x.checked=cb.checked);syncMulti(f)});
 $$('.option input').forEach(cb=>cb.onchange=()=>syncMulti(cb.closest('.multi')));
 $$('.search-input').forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.oninput=()=>{const q=inp.value.toLowerCase();$$('.option',inp.closest('.drop')).forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'flex':'none')}});
 $$('.simple-select').forEach(sel=>sel.onchange=()=>{const sec=sel.dataset.section,key=sel.dataset.key;S[sec][key]=Number(sel.value)});
-$$('.product-input').forEach(inp=>inp.oninput=()=>S[inp.dataset.section].product=inp.value);
+$$('.product-picker').forEach(picker=>{
+  const sec=picker.dataset.section;
+  const inp=$('.product-input',picker);
+  const drop=$('.product-suggest',picker);
+  const opts=$('.product-options',picker);
+  const info=$('.product-suggest-info',picker);
+  const clear=$('.product-clear',picker);
+  let timer=null;
+  let requestSeq=0;
+
+  const close=()=>picker.classList.remove('open');
+  const open=()=>picker.classList.add('open');
+
+  async function searchProducts(){
+    const q=inp.value.trim();
+    S[sec].productLabel=q;
+    S[sec].product=q;
+    clear.classList.toggle('hidden',!q);
+
+    if(q.length<2){
+      opts.innerHTML='';
+      info.textContent='Ketik minimal 2 karakter SKU atau nama item';
+      open();
+      return;
+    }
+
+    const seq=++requestSeq;
+    info.textContent='Searching item...';
+    opts.innerHTML='';
+    open();
+
+    try{
+      const rows=await api('/api/meta/products?q='+encodeURIComponent(q));
+      if(seq!==requestSeq)return;
+
+      if(!rows.length){
+        info.textContent='Item tidak ditemukan';
+        return;
+      }
+
+      info.textContent=`${rows.length}${rows.length>=50?'+':''} item ditemukan • pilih 1 item`;
+      opts.innerHTML=rows.map((r,i)=>`
+        <button class="product-option" type="button"
+          data-sku="${esc(r.sku)}"
+          data-name="${esc(r.itemName)}"
+          data-brand="${esc(r.brand||'')}">
+          <span class="product-option-sku">${esc(r.sku||'-')}</span>
+          <span class="product-option-name">${esc(r.itemName||'-')}</span>
+          <span class="product-option-brand">${esc(r.brand||'')}</span>
+        </button>`).join('');
+
+      $$('.product-option',opts).forEach(btn=>btn.onclick=e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const sku=btn.dataset.sku||'';
+        const name=btn.dataset.name||'';
+        S[sec].product=sku || name;
+        S[sec].productLabel=sku && name ? `${sku} — ${name}` : (sku||name);
+        inp.value=S[sec].productLabel;
+        clear.classList.remove('hidden');
+        close();
+      });
+    }catch(err){
+      if(seq!==requestSeq)return;
+      info.textContent='Gagal memuat list item';
+      opts.innerHTML=`<div class="product-error">${esc(err.message)}</div>`;
+    }
+  }
+
+  inp.onclick=e=>{
+    e.stopPropagation();
+    open();
+    if(inp.value.trim().length>=2) searchProducts();
+  };
+  inp.onfocus=()=>{
+    open();
+    if(inp.value.trim().length>=2) searchProducts();
+  };
+  inp.oninput=()=>{
+    // User is typing again, so the current filter becomes the typed text
+    // until a single item is selected from the list.
+    clearTimeout(timer);
+    timer=setTimeout(searchProducts,220);
+  };
+  inp.onkeydown=e=>{
+    if(e.key==='Escape'){close();inp.blur();}
+    if(e.key==='Enter'){
+      const first=$('.product-option',opts);
+      if(first){e.preventDefault();first.click();}
+    }
+  };
+
+  clear.onclick=e=>{
+    e.preventDefault();
+    e.stopPropagation();
+    requestSeq++;
+    clearTimeout(timer);
+    inp.value='';
+    S[sec].product='';
+    S[sec].productLabel='';
+    opts.innerHTML='';
+    info.textContent='Ketik minimal 2 karakter SKU atau nama item';
+    clear.classList.add('hidden');
+    open();
+    inp.focus();
+  };
+
+  drop.onclick=e=>e.stopPropagation();
+});
 $$('.prev2-hide').forEach(btn=>btn.onclick=e=>{
   e.preventDefault();e.stopPropagation();
   const sec=btn.dataset.section;
@@ -83,7 +208,7 @@ $$('.range').forEach(setupRange);
 }
 function syncMulti(f){const sec=f.dataset.section,key=f.dataset.key;const values=$$('.option input:checked',f).map(x=>x.value);S[sec].filters[key]=values;$('.multi-label',f).textContent=values.length===$$('.option input',f).length?'All '+$('label',f).textContent:values.length+' Selected';const ta=$('.toggle-all',f);if(ta)ta.checked=values.length===$$('.option input',f).length;if(sec==='store'&&key==='pts'){const allowed=META.stores.filter(x=>values.includes(x.pt)).map(x=>x.name);S.store.filters.stores=S.store.filters.stores.filter(x=>allowed.includes(x));if(!S.store.filters.stores.length)S.store.filters.stores=allowed;renderFilters()}}
 
-document.addEventListener('click',e=>{$$('.multi.open,.range.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')});$$('.download-wrap.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')})});
+document.addEventListener('click',e=>{$$('.multi.open,.range.open,.product-picker.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')});$$('.download-wrap.open').forEach(x=>{if(!x.contains(e.target))x.classList.remove('open')})});
 
 function setupRange(f){
   const sec=f.dataset.section,key=f.dataset.key;
@@ -158,7 +283,7 @@ function setupRange(f){
 
   btn.onclick=e=>{
     e.stopPropagation();
-    $$('.multi.open,.range.open').forEach(x=>x!==f&&x.classList.remove('open'));
+    $$('.multi.open,.range.open,.product-picker.open').forEach(x=>x!==f&&x.classList.remove('open'));
     f.classList.toggle('open');
   };
   $('.prev',f).onclick=e=>{
@@ -346,8 +471,12 @@ function excelCellText(td){
 }
 function cssArgb(cssColor,fallback='FF1F2937'){
   if(!cssColor || cssColor==='transparent') return fallback;
-  const m=String(cssColor).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  const s=String(cssColor).trim();
+  const m=s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
   if(!m) return fallback;
+  // Browsers report unfilled table cells as rgba(0, 0, 0, 0).
+  // Treat fully transparent colors as "no fill" instead of opaque black.
+  if(m[4]!==undefined && Number(m[4])===0) return fallback;
   return 'FF'+[m[1],m[2],m[3]].map(x=>Number(x).toString(16).padStart(2,'0')).join('').toUpperCase();
 }
 function excelBorderStyle(cssStyle){
