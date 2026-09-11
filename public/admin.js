@@ -140,7 +140,7 @@ function renderMonthStorage(){
     const effectiveStatus=s.rowCount?'DATA':'NO DATA';
     const cls=s.rowCount?'open':'empty';
     return `<tr>
-      <td><b>${esc(s.month)}</b><br><span class="muted-mini">/app/data/monthly/${esc(s.month.slice(0,4))}/${esc(s.month.slice(5))}.json</span></td>
+      <td><b>${esc(s.month)}</b><br><span class="muted-mini">/app/data/monthly/${esc(s.month.slice(0,4))}/${esc(s.month.slice(5))}.json.gz</span></td>
       <td class="center"><span class="badge ${cls}">${esc(effectiveStatus)}</span></td>
       <td class="num">${Number(s.rowCount||0).toLocaleString()}</td>
       <td>${esc(s.minDate||'-')} → ${esc(s.maxDate||'-')}</td>

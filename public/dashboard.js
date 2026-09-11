@@ -452,6 +452,10 @@ if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
 }catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable'}[sec];$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
+function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
+
+function groupHead(name,p,cls){return `<th colspan="3" class="${cls}">${name}<span class="period-sub">${rangeLabel(p)}</span></th>`}
+
 function renderChannel(d){const ps=periodsFor('channel'),n=ps.length;let h=`<table class="sortable-table chart-table" data-chart-label="0"><thead><tr><th rowspan="2">CHANNEL</th>${groupHead('CURRENT',ps[0],'group-current')}${groupHead('PREVIOUS 1',ps[1],'group-prev1')}${n===3?groupHead('PREVIOUS 2',ps[2],'group-prev2'):''}<th colspan="3" class="group-growth">GROWTH vs P1</th>${n===3?'<th colspan="3" class="group-growth">GROWTH vs P2</th>':''}</tr><tr>${Array.from({length:n},()=>'<th>Sales</th><th>Trx</th><th>Basket Size</th>').join('')}<th>Sales</th><th>Trx</th><th>Basket</th>${n===3?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}</tr></thead><tbody>`;for(const r of d.rows){h+=`<tr><td>${esc(r.channel)}</td>${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}<td class="num ${r.growthP1?.sales>=0?'pos':'neg'}">${fp(r.growthP1?.sales)}</td><td class="num ${r.growthP1?.trx>=0?'pos':'neg'}">${fp(r.growthP1?.trx)}</td><td class="num ${r.growthP1?.basket>=0?'pos':'neg'}">${fp(r.growthP1?.basket)}</td>${n===3?`<td class="num ${r.growthP2?.sales>=0?'pos':'neg'}">${fp(r.growthP2?.sales)}</td><td class="num ${r.growthP2?.trx>=0?'pos':'neg'}">${fp(r.growthP2?.trx)}</td><td class="num ${r.growthP2?.basket>=0?'pos':'neg'}">${fp(r.growthP2?.basket)}</td>`:''}</tr>`}
 const tg1={sales:(d.total[0].sales-d.total[1].sales)/d.total[1].sales,trx:(d.total[0].trx-d.total[1].trx)/d.total[1].trx,basket:(d.total[0].basket-d.total[1].basket)/d.total[1].basket},tg2=n===3?{sales:(d.total[0].sales-d.total[2].sales)/d.total[2].sales,trx:(d.total[0].trx-d.total[2].trx)/d.total[2].trx,basket:(d.total[0].basket-d.total[2].basket)/d.total[2].basket}:null;
 h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td>${d.total.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}<td class="num">${fp(tg1.sales)}</td><td class="num">${fp(tg1.trx)}</td><td class="num">${fp(tg1.basket)}</td>${n===3?`<td class="num">${fp(tg2.sales)}</td><td class="num">${fp(tg2.trx)}</td><td class="num">${fp(tg2.basket)}</td>`:''}</tr>`;
@@ -542,6 +546,13 @@ function renderStore(d){
   enhanceTable(t);
 }
 
+
+function summaryRankRows(displayed,allv,share,n,labelSpan){
+  const vals=a=>a.slice(0,n).map(x=>`<td class="num">${fmt(x.sales)}</td>`).join('');
+  const p=a=>a.slice(0,n).map(x=>`<td class="num">${pct(x)}</td>`).join('');
+  const extra=n===3?3:2;
+  return `<tr class="rank-summary no-sort-row"><td colspan="2">TOTAL SALES DISPLAYED</td>${vals(displayed)}<td colspan="${extra}"></td></tr><tr class="rank-summary total-all no-sort-row"><td colspan="2">TOTAL ALL SALES</td>${vals(allv)}<td colspan="${extra}"></td></tr><tr class="rank-summary percent no-sort-row"><td colspan="2">% OF TOTAL</td>${p(share)}<td colspan="${extra}"></td></tr>`;
+}
 
 function renderBrand(d){
   const ps=periodsFor('brand'),n=ps.length;
