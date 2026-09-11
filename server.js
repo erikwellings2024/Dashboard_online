@@ -26,6 +26,7 @@ const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
 const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
 const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
+const META_INDEX_FILE = path.join(DATA_DIR, 'meta-index.json');
 const STORAGE_START_MONTH = '2026-01';
 const STORAGE_END_MONTH = '2028-12';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -99,7 +100,8 @@ const DEFAULT_CONFIG = {
 };
 
 let config = null;
-let rawRows = [];
+let rawRows = []; // legacy compatibility only; v22 no longer keeps all history in RAM.
+let metaIndex = { brands:[], categories:[], salesTypes:[], customerTypes:[], products:[] };
 let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
 let monthIndex = {};
 
@@ -154,6 +156,85 @@ async function readAllMonthlyRows() {
   return all;
 }
 
+
+function monthIndexTotals() {
+  const entries=Object.values(monthIndex||{}).filter(x=>x && Number(x.rowCount||0)>0);
+  let rowCount=0,minDate=null,maxDate=null;
+  for(const m of entries){
+    rowCount+=Number(m.rowCount||0);
+    if(m.minDate && (!minDate || m.minDate<minDate)) minDate=m.minDate;
+    if(m.maxDate && (!maxDate || m.maxDate>maxDate)) maxDate=m.maxDate;
+  }
+  return {rowCount,minDate,maxDate};
+}
+
+async function readRowsForPeriods(periods) {
+  const keys=new Set();
+  for(const p of periods){
+    for(const key of monthKeysInRange(p.start,p.end)) {
+      if(monthAllowed(key)) keys.add(key);
+    }
+  }
+
+  const rows=[];
+  for(const key of [...keys].sort()){
+    const monthRows=await readJson(monthPath(key),[]);
+    if(!Array.isArray(monthRows) || !monthRows.length) continue;
+    for(const row of monthRows){
+      // Store / PT / Store Stat / Channel master changes are applied dynamically.
+      const r=redecorateRow(row);
+      if(periods.some(p=>rowInPeriod(r,p))) rows.push(r);
+    }
+  }
+  return rows;
+}
+
+function emptyMetaIndex(){
+  return {brands:[],categories:[],salesTypes:[],customerTypes:[],products:[]};
+}
+
+function mergeMetaRows(target,rows){
+  const brands=new Set(target.brands||[]);
+  const categories=new Set(target.categories||[]);
+  const salesTypes=new Set(target.salesTypes||[]);
+  const customerTypes=new Set(target.customerTypes||[]);
+  const products=new Map((target.products||[]).map(p=>[`${p.sku}|${p.itemName}`,p]));
+
+  for(const r of rows||[]){
+    if(r.brand) brands.add(r.brand);
+    if(r.category) categories.add(r.category);
+    if(r.salesType) salesTypes.add(r.salesType);
+    if(r.customerType && r.customerType!=='UNSPECIFIED') customerTypes.add(r.customerType);
+
+    const sku=String(r.newItemCode||r.sku||'').trim();
+    const itemName=String(r.itemName||'').trim();
+    if(sku || itemName){
+      const key=`${sku}|${itemName}`;
+      if(!products.has(key)) products.set(key,{sku,newItemCode:r.newItemCode||'',itemName,brand:r.brand||''});
+    }
+  }
+
+  return {
+    brands:[...brands].sort(),
+    categories:[...categories].sort(),
+    salesTypes:[...salesTypes].sort(),
+    customerTypes:[...customerTypes].sort(),
+    products:[...products.values()]
+  };
+}
+
+async function rebuildMetaIndexFromMonthly() {
+  let idx=emptyMetaIndex();
+  for(const key of storageMonthKeys()){
+    if(Number(monthIndex[key]?.rowCount||0)<=0) continue;
+    const rows=await readJson(monthPath(key),[]);
+    if(Array.isArray(rows) && rows.length) idx=mergeMetaRows(idx,rows);
+  }
+  metaIndex=idx;
+  await writeJsonAtomic(META_INDEX_FILE,metaIndex);
+  return metaIndex;
+}
+
 async function writeMonthRows(key, rows) {
   if (!monthAllowed(key)) throw new Error(`MONTH_OUT_OF_RANGE:${key}`);
   const file=monthPath(key);
@@ -162,30 +243,34 @@ async function writeMonthRows(key, rows) {
 }
 
 async function migrateLegacyCacheIfNeeded() {
-  const existing=await readAllMonthlyRows();
-  if (existing.length) return existing;
+  const totals=monthIndexTotals();
+  if(totals.rowCount>0) return [];
+
   const legacy=await readJson(RAW_CACHE_FILE, []);
   if (!Array.isArray(legacy) || !legacy.length) return [];
+
   const grouped={};
   for (const r of legacy) {
     const key=monthKey(r.date);
     if (!monthAllowed(key)) continue;
     (grouped[key] ||= []).push(r);
   }
+
   for (const [key,rows] of Object.entries(grouped)) {
     await writeMonthRows(key, rows);
+    const coverage=dataCoverage(rows);
     monthIndex[key]={
       month:key,
       rowCount:rows.length,
-      minDate:dataCoverage(rows).minDate,
-      maxDate:dataCoverage(rows).maxDate,
+      minDate:coverage.minDate,
+      maxDate:coverage.maxDate,
       updatedAt:null,
       uploadedBy:'system-migration',
       sourceFile:'legacy raw-cache.json'
     };
   }
   if (Object.keys(grouped).length) await writeJsonAtomic(MONTH_INDEX_FILE, monthIndex);
-  return legacy;
+  return [];
 }
 
 function monthStatus(key) {
@@ -232,11 +317,29 @@ async function bootstrap() {
   await ensureMonthlyFolders();
   monthIndex = await readJson(MONTH_INDEX_FILE, {});
   if (!monthIndex || typeof monthIndex !== 'object' || Array.isArray(monthIndex)) monthIndex={};
-  rawRows = await migrateLegacyCacheIfNeeded();
-  if (!rawRows.length) rawRows = await readAllMonthlyRows();
+  await migrateLegacyCacheIfNeeded();
+
   runtime = await readJson(RUNTIME_FILE, runtime);
-  runtime = { updatedAt:null, sourceFile:null, rowCount:rawRows.length, minDate:null, maxDate:null, uploadHistory:[], ...(runtime||{}) };
+  const totals=monthIndexTotals();
+  runtime = {
+    updatedAt:null,
+    sourceFile:null,
+    rowCount:totals.rowCount,
+    minDate:totals.minDate,
+    maxDate:totals.maxDate,
+    uploadHistory:[],
+    ...(runtime||{}),
+    rowCount:totals.rowCount,
+    minDate:totals.minDate,
+    maxDate:totals.maxDate
+  };
   if (!Array.isArray(runtime.uploadHistory)) runtime.uploadHistory=[];
+
+  metaIndex=await readJson(META_INDEX_FILE,null);
+  if(!metaIndex || !Array.isArray(metaIndex.products)){
+    console.log('[META] rebuilding compact metadata index from monthly files...');
+    await rebuildMetaIndexFromMonthly();
+  }
 
   let users = await readJson(USERS_FILE, null);
   if (!users) {
@@ -767,16 +870,13 @@ function redecorateRow(r) {
 }
 
 async function redecorateAllRows() {
-  rawRows = rawRows.map(redecorateRow);
-  const grouped={};
-  for (const r of rawRows) {
-    const key=monthKey(r.date);
-    if (monthAllowed(key)) (grouped[key] ||= []).push(r);
-  }
-  for (const [key,rows] of Object.entries(grouped)) await writeMonthRows(key,rows);
+  // v22: no bulk rewrite.
+  // Store / PT / Store Stat / Channel master changes are applied dynamically
+  // when a monthly file is read for a dashboard query.
+  return;
 }
 
-function filterBase(filters = {}) {
+function filterBase(sourceRows, filters = {}) {
   const stores = arr(filters.stores).map(x => x.toUpperCase());
   const pts = arr(filters.pts).map(x => x.toUpperCase());
   const categories = arr(filters.categories).map(x => x.toUpperCase());
@@ -786,7 +886,7 @@ function filterBase(filters = {}) {
   const storeStats = arr(filters.storeStats).map(x => x.toUpperCase());
   const channels = arr(filters.channels).map(x => x.toUpperCase());
   const product = String(filters.product || '').trim().toUpperCase();
-  return rawRows.filter(r => {
+  return sourceRows.filter(r => {
     if (stores.length && !stores.includes(String(r.store).toUpperCase())) return false;
     if (pts.length && !pts.includes(String(r.pt).toUpperCase())) return false;
     if (categories.length && !categories.includes(String(r.category).toUpperCase())) return false;
@@ -812,8 +912,8 @@ function metricsByPeriod(rows, periods) {
   return periods.map(p => metrics(rows.filter(r => rowInPeriod(r,p))));
 }
 
-function channelQuery(periods, filters) {
-  const base = filterBase(filters);
+function channelQuery(sourceRows, periods, filters) {
+  const base = filterBase(sourceRows,filters);
   const channels = activeChannels();
   const rows = channels.map(c => {
     const subset = base.filter(r => r.channel === c.name);
@@ -845,8 +945,8 @@ function channelQuery(periods, filters) {
   return { rows, total, telemed, telemedPct, variance };
 }
 
-function targetQuery(period, filters, daysTotalBestEstimate) {
-  const base = filterBase(filters).filter(r => rowInPeriod(r,period));
+function targetQuery(sourceRows, period, filters, daysTotalBestEstimate) {
+  const base = filterBase(sourceRows,filters).filter(r => rowInPeriod(r,period));
   const key = monthKey(period.end);
   const targetMap = config.targets[key] || {};
   const elapsedDays = daysInclusive(period.start, period.end);
@@ -896,8 +996,8 @@ function targetQuery(period, filters, daysTotalBestEstimate) {
   };
 }
 
-function storeQuery(periods, filters) {
-  const base = filterBase(filters);
+function storeQuery(sourceRows, periods, filters) {
+  const base = filterBase(sourceRows,filters);
   const active = config.stores.filter(s=>s.active);
   const unique = new Map();
   for (const s of active) if (!unique.has(s.name)) unique.set(s.name, {
@@ -933,8 +1033,8 @@ function groupBy(rows, keyFn) {
   return map;
 }
 
-function brandQuery(periods, filters, topN) {
-  const base = filterBase(filters);
+function brandQuery(sourceRows, periods, filters, topN) {
+  const base = filterBase(sourceRows,filters);
   const brands = groupBy(base, r=>r.brand || 'UNBRANDED');
   let rows = [...brands.entries()].map(([brand,rr])=>({ brand, periods:metricsByPeriod(rr,periods) }));
   rows.sort((a,b)=>b.periods[0].sales-a.periods[0].sales);
@@ -949,8 +1049,8 @@ function brandQuery(periods, filters, topN) {
   };
 }
 
-function itemQuery(periods, filters, topN) {
-  const base = filterBase(filters);
+function itemQuery(sourceRows, periods, filters, topN) {
+  const base = filterBase(sourceRows,filters);
   const groups = groupBy(base, r=>`${String(r.newItemCode || r.sku || '').trim()}|||${r.itemName}|||${r.brand}`);
   const all = [...groups.entries()].map(([key,rr])=>{
     const [sku,itemName,brand] = key.split('|||');
@@ -1042,71 +1142,90 @@ app.post('/api/auth/logout', (req,res)=>{ res.clearCookie('auth'); res.json({ok:
 app.get('/api/auth/me', requireAuth, (req,res)=>res.json(req.user));
 
 app.get('/api/meta', requireAuth, (req,res)=>{
-  const brands=[...new Set(rawRows.map(r=>r.brand).filter(Boolean))].sort();
-  const categories=[...new Set(rawRows.map(r=>r.category).filter(Boolean))].sort();
-  const salesTypes=[...new Set(rawRows.map(r=>r.salesType).filter(Boolean))].sort();
-  const customerTypes=[...new Set(rawRows.map(r=>r.customerType).filter(v=>v&&v!=='UNSPECIFIED'))].sort();
   const stores=[...new Map(config.stores.filter(s=>s.active).map(s=>[s.name,{
     name:s.name,
     pt:s.pt,
     storeStat:s.storeStatus==='New Store'?'New Store':'Existing Store'
   }])).values()].sort((a,b)=>a.name.localeCompare(b.name));
-  const dates=rawRows.map(r=>r.date).filter(Boolean).sort();
+
+  const totals=monthIndexTotals();
+
   res.json({
     channels:activeChannels().map(c=>c.name),
     stores,
     pts:['EFM','EFIT','ESB'],
     storeStats:['Existing Store','New Store'],
-    categories,
-    brands,
-    salesTypes,
-    customerTypes,
+    categories:metaIndex.categories||[],
+    brands:metaIndex.brands||[],
+    salesTypes:metaIndex.salesTypes||[],
+    customerTypes:metaIndex.customerTypes||[],
     rankingDefault:config.rankingDefault,
-    runtime,
+    runtime:{...(runtime||{}),rowCount:totals.rowCount,minDate:totals.minDate,maxDate:totals.maxDate},
     uploadPolicy:uploadPolicy(),
     storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH},
     monthSlots:monthSlots(),
-    minDate:dates[0]||null,
-    maxDate:dates[dates.length-1]||null
+    minDate:totals.minDate,
+    maxDate:totals.maxDate
   });
 });
 
 app.get('/api/meta/products', requireAuth, (req,res)=>{
   const q=String(req.query.q||'').trim().toUpperCase();
   if (q.length<2) return res.json([]);
-  const seen=new Set(), out=[];
-  for (const r of rawRows) {
-    if (!(`${r.sku} ${r.newItemCode} ${r.itemName}`.toUpperCase().includes(q))) continue;
-    const displaySku=String(r.newItemCode || r.sku || '').trim();
-    const key=`${displaySku}|${r.itemName}`;
-    if (seen.has(key)) continue;
-    seen.add(key); out.push({sku:displaySku,newItemCode:r.newItemCode,itemName:r.itemName,brand:r.brand});
-    if (out.length>=50) break;
+
+  const out=[];
+  for(const p of metaIndex.products||[]){
+    if(!(`${p.sku||''} ${p.newItemCode||''} ${p.itemName||''} ${p.brand||''}`.toUpperCase().includes(q))) continue;
+    out.push(p);
+    if(out.length>=50) break;
   }
   res.json(out);
 });
 
-app.post('/api/query/channel', requireAuth, (req,res)=>{
-  try { const periods=normalizePeriods(req.body.periods); res.json(channelQuery(periods,req.body.filters||{})); }
-  catch(e){ res.status(400).json({error:e.message}); }
-});
-app.post('/api/query/target', requireAuth, (req,res)=>{
+app.post('/api/query/channel', requireAuth, async (req,res)=>{
   try {
-    const period=normalizePeriods([req.body.period])[0];
-    res.json(targetQuery(period,req.body.filters||{},req.body.daysTotalBestEstimate));
+    const periods=normalizePeriods(req.body.periods);
+    const rows=await readRowsForPeriods(periods);
+    res.json(channelQuery(rows,periods,req.body.filters||{}));
   }
   catch(e){ res.status(400).json({error:e.message}); }
 });
-app.post('/api/query/store', requireAuth, (req,res)=>{
-  try { const periods=normalizePeriods(req.body.periods); res.json(storeQuery(periods,req.body.filters||{})); }
+
+app.post('/api/query/target', requireAuth, async (req,res)=>{
+  try {
+    const period=normalizePeriods([req.body.period])[0];
+    const rows=await readRowsForPeriods([period]);
+    res.json(targetQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate));
+  }
   catch(e){ res.status(400).json({error:e.message}); }
 });
-app.post('/api/query/brand', requireAuth, (req,res)=>{
-  try { const periods=normalizePeriods(req.body.periods); const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10))); res.json(brandQuery(periods,req.body.filters||{},n)); }
+
+app.post('/api/query/store', requireAuth, async (req,res)=>{
+  try {
+    const periods=normalizePeriods(req.body.periods);
+    const rows=await readRowsForPeriods(periods);
+    res.json(storeQuery(rows,periods,req.body.filters||{}));
+  }
   catch(e){ res.status(400).json({error:e.message}); }
 });
-app.post('/api/query/items', requireAuth, (req,res)=>{
-  try { const periods=normalizePeriods(req.body.periods); const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10))); res.json(itemQuery(periods,req.body.filters||{},n)); }
+
+app.post('/api/query/brand', requireAuth, async (req,res)=>{
+  try {
+    const periods=normalizePeriods(req.body.periods);
+    const rows=await readRowsForPeriods(periods);
+    const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10)));
+    res.json(brandQuery(rows,periods,req.body.filters||{},n));
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
+});
+
+app.post('/api/query/items', requireAuth, async (req,res)=>{
+  try {
+    const periods=normalizePeriods(req.body.periods);
+    const rows=await readRowsForPeriods(periods);
+    const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10)));
+    res.json(itemQuery(rows,periods,req.body.filters||{},n));
+  }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
@@ -1164,13 +1283,14 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     };
     await writeJsonAtomic(MONTH_INDEX_FILE,monthIndex);
 
-    // Refresh only the replaced month in memory. Do not re-read every historical
-    // partition during upload.
-    const kept=rawRows.filter(r=>monthKey(r.date)!==targetMonth);
+    // v22: do not concatenate historical transaction rows in memory.
+    // Coverage and row count come from the monthly index.
     const freshMonth=await readJson(monthPath(targetMonth),[]);
-    rawRows=kept.concat(Array.isArray(freshMonth)?freshMonth:[]);
-    rawRows.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-    const coverage=dataCoverage(rawRows);
+    if(Array.isArray(freshMonth) && freshMonth.length){
+      metaIndex=mergeMetaRows(metaIndex,freshMonth);
+      await writeJsonAtomic(META_INDEX_FILE,metaIndex);
+    }
+    const coverage=monthIndexTotals();
 
     const entry={
       id:crypto.randomUUID(),
@@ -1183,12 +1303,12 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
       detectedEnd:incomingCoverage.maxDate,
       incomingRows:streamed.validRows,
       replacedRows,
-      totalRows:rawRows.length,
+      totalRows:coverage.rowCount,
       monthStatusBefore:status
     };
 
     runtime={
-      ...(runtime||{}),updatedAt:now,sourceFile:req.file.originalname,rowCount:rawRows.length,
+      ...(runtime||{}),updatedAt:now,sourceFile:req.file.originalname,rowCount:coverage.rowCount,
       minDate:coverage.minDate,maxDate:coverage.maxDate,lastUpload:entry,
       uploadHistory:Array.isArray(runtime.uploadHistory)?runtime.uploadHistory:[]
     };
@@ -1198,7 +1318,7 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     res.json({
       ok:true,mode:'monthly_replace',targetMonth,
       detectedStart:incomingCoverage.minDate,detectedEnd:incomingCoverage.maxDate,
-      incomingRows:streamed.validRows,replacedRows,rowCount:rawRows.length,
+      incomingRows:streamed.validRows,replacedRows,rowCount:coverage.rowCount,
       minDate:coverage.minDate,maxDate:coverage.maxDate,month:monthIndex[targetMonth],
       monthSlots:monthSlots()
     });
@@ -1243,7 +1363,8 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
     rankingDefault:Math.max(1,Math.min(10,Number(incoming.rankingDefault||10)))
   };
   await writeJsonAtomic(CONFIG_FILE,config);
-  await redecorateAllRows();
+  // No historical rewrite required. Master mapping is applied dynamically
+  // when dashboard rows are queried.
   res.json({ok:true,config});
 });
 
@@ -1320,4 +1441,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Monthly closing: disabled`)));
