@@ -597,3 +597,60 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 }
 #categoryMapTable td:first-child,#categoryMapTable th:first-child{width:45%}
 #categoryMapTable td:nth-child(2),#categoryMapTable th:nth-child(2){width:45%}
+
+
+/* v25 — Actual vs Target Category refinements */
+#categoryTargetFilters .filter-grid{
+  grid-template-columns:
+    minmax(175px,1.25fr)
+    minmax(115px,.82fr)
+    minmax(135px,.95fr)
+    minmax(125px,.90fr)
+    minmax(120px,.86fr)
+    minmax(125px,.90fr)
+    minmax(115px,.82fr)
+    minmax(150px,1.02fr)
+    minmax(100px,.68fr);
+}
+
+#categoryTargetTable .category-target-table .no-col{
+  width:36px;
+  min-width:36px;
+  max-width:36px;
+  padding-left:4px;
+  padding-right:4px;
+  text-align:center;
+}
+
+#categoryTargetTable .category-target-table th:nth-child(2){
+  min-width:210px;
+}
+
+#categoryTargetTable .category-target-table th:nth-child(8),
+#categoryTargetTable .category-target-table th:nth-child(9){
+  min-width:105px;
+}
+
+#categoryTargetTable .category-target-table th:last-child,
+#categoryTargetTable .category-target-table td:last-child{
+  width:70px;
+  min-width:70px;
+}
+
+#categoryMapTable th:nth-child(3),
+#categoryMapTable td:nth-child(3){
+  width:90px;
+  max-width:90px;
+}
+
+@media(max-width:1600px){
+  #categoryTargetFilters .filter-grid{
+    grid-template-columns:repeat(5,minmax(145px,1fr));
+  }
+}
+@media(max-width:1000px){
+  #categoryTargetFilters .filter-grid{
+    min-width:1180px;
+    grid-template-columns:repeat(5,minmax(185px,1fr));
+  }
+}

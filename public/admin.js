@@ -31,7 +31,12 @@ function mappedCategoriesAdmin(){
     ...(META?.rawCategories||[]),
     ...Object.keys(CFG.categoryMap||{})
   ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))];
-  return [...new Set(raw.map(x=>String(CFG.categoryMap?.[x]||x).trim().toUpperCase()).filter(Boolean))].sort();
+  return [...new Set(raw.map(x=>String(CFG.categoryMap?.[x]||x).trim().toUpperCase()).filter(Boolean))]
+    .sort((a,b)=>{
+      const sa=Number(CFG.categorySort?.[a]??META?.categorySort?.[a]??9999);
+      const sb=Number(CFG.categorySort?.[b]??META?.categorySort?.[b]??9999);
+      return sa-sb || a.localeCompare(b);
+    });
 }
 
 function renderCategoryTarget(){
@@ -52,30 +57,46 @@ $('#saveCategoryTarget').onclick=async()=>{
   }catch(e){msg('#categoryTargetMsg',e.message,false)}
 };
 
-function categoryMapRow(raw='',mapped=''){
-  return `<tr><td><input class="cat-raw" value="${esc(raw)}"></td><td><input class="cat-map" value="${esc(mapped||raw)}"></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`;
+function categoryMapRow(raw='',mapped='',sort=99){
+  return `<tr><td><input class="cat-raw" value="${esc(raw)}"></td><td><input class="cat-map" value="${esc(mapped||raw)}"></td><td><input class="cat-sort" type="number" min="1" step="1" value="${Number(sort||99)}"></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`;
 }
 function renderCategoryMap(){
   const raw=[...new Set([
     ...(META?.rawCategories||[]),
     ...Object.keys(CFG.categoryMap||{})
-  ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))].sort();
-  $('#categoryMapTable tbody').innerHTML=raw.map(r=>categoryMapRow(r,CFG.categoryMap?.[r]||r)).join('');
+  ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))].sort((a,b)=>{
+    const ma=String(CFG.categoryMap?.[a]||a).trim().toUpperCase();
+    const mb=String(CFG.categoryMap?.[b]||b).trim().toUpperCase();
+    const sa=Number(CFG.categorySort?.[ma]??META?.categorySort?.[ma]??9999);
+    const sb=Number(CFG.categorySort?.[mb]??META?.categorySort?.[mb]??9999);
+    return sa-sb || ma.localeCompare(mb) || a.localeCompare(b);
+  });
+  $('#categoryMapTable tbody').innerHTML=raw.map(r=>{
+    const mapped=String(CFG.categoryMap?.[r]||r).trim().toUpperCase();
+    const sort=Number(CFG.categorySort?.[mapped]??META?.categorySort?.[mapped]??99);
+    return categoryMapRow(r,mapped,sort);
+  }).join('');
   bindRemove();
 }
 function collectCategoryMap(){
-  const out={};
+  const map={},sort={};
   $$('#categoryMapTable tbody tr').forEach(r=>{
     const raw=$('.cat-raw',r).value.trim().toUpperCase();
     const mapped=$('.cat-map',r).value.trim().toUpperCase();
-    if(raw&&mapped)out[raw]=mapped;
+    const order=Number($('.cat-sort',r).value||99);
+    if(raw&&mapped){
+      map[raw]=mapped;
+      if(sort[mapped]===undefined || order<sort[mapped])sort[mapped]=order;
+    }
   });
-  return out;
+  return {map,sort};
 }
-$('#addCategoryMap').onclick=()=>{$('#categoryMapTable tbody').insertAdjacentHTML('beforeend',categoryMapRow());bindRemove()};
+$('#addCategoryMap').onclick=()=>{$('#categoryMapTable tbody').insertAdjacentHTML('beforeend',categoryMapRow('','',99));bindRemove()};
 $('#saveCategoryMap').onclick=async()=>{
   try{
-    CFG.categoryMap=collectCategoryMap();
+    const collected=collectCategoryMap();
+    CFG.categoryMap=collected.map;
+    CFG.categorySort=collected.sort;
     await saveConfig();
     META=await api('/api/meta');
     renderCategoryMap();
@@ -224,6 +245,7 @@ async function boot(){
 
   CFG.categoryTargets=CFG.categoryTargets||{};
   CFG.categoryMap=CFG.categoryMap||{};
+  CFG.categorySort=CFG.categorySort||META?.categorySort||{};
 
   renderChannels();
   renderStores();

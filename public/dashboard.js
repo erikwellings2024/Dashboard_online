@@ -43,7 +43,7 @@ channels:clone(META.channels)
 };
 S.channel={periods:clone(p),prevCount:2,product:'',productLabel:'',filters:{stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.target={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEstMonth:p[0].end.slice(0,7),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
-S.categoryTarget={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEstMonth:p[0].end.slice(0,7),filters:{stores:clone(common.stores),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.categoryTarget={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEstMonth:p[0].end.slice(0,7),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.store={periods:clone(p),prevCount:2,metricMode:'value',product:'',productLabel:'',filters:{pts:['EFM','EFIT','ESB'],stores:clone(common.stores),channels:clone(common.channels),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
@@ -109,6 +109,15 @@ function activeFilterChips(section){
     chips+=activeProductChip(s);
   }
 
+  if(section==='categoryTarget'){
+    chips+=activeMultiChip('Channel',s.filters.channels,META.channels);
+    chips+=activeMultiChip('Category',s.filters.categories,META.categories);
+    chips+=activeMultiChip('Store',s.filters.stores,META.stores);
+    chips+=activeMultiChip('Sales Type',s.filters.salesTypes,META.salesTypes);
+    chips+=activeMultiChip('Customer Type',s.filters.customerTypes,META.customerTypes||[]);
+    chips+=activeMultiChip('Store Stat',s.filters.storeStats,META.storeStats||[]);
+  }
+
   if(section==='store'){
     chips+=activeMultiChip('PT',s.filters.pts,META.pts);
     const allowed=META.stores.filter(x=>s.filters.pts.includes(x.pt));
@@ -154,7 +163,7 @@ function renderFilters(){
   $('#targetFilters').innerHTML=`<div class="filter-grid">${rangeControl('target','period','Actual Period',t.period)}${multiControl('target','stores','Store',META.stores,t.filters.stores,true)}${multiControl('target','salesTypes','Sales Type',META.salesTypes,t.filters.salesTypes)}${multiControl('target','customerTypes','Customer Type',META.customerTypes||[],t.filters.customerTypes)}${multiControl('target','storeStats','Store Stat',META.storeStats||[],t.filters.storeStats)}${numberControl('target','bestEstDays','Days Total Best Estimate',t.bestEstDays)}<button class="apply" data-apply="target">APPLY</button></div><div class="chips"><span class="chip"><b>Section 2 only</b></span>${timeFactorChip(t.period)}</div>`;
 
   const ct=S.categoryTarget;
-  $('#categoryTargetFilters').innerHTML=`<div class="filter-grid">${rangeControl('categoryTarget','period','Actual Period',ct.period)}${multiControl('categoryTarget','stores','Store',META.stores,ct.filters.stores,true)}${multiControl('categoryTarget','salesTypes','Sales Type',META.salesTypes,ct.filters.salesTypes)}${multiControl('categoryTarget','customerTypes','Customer Type',META.customerTypes||[],ct.filters.customerTypes)}${multiControl('categoryTarget','storeStats','Store Stat',META.storeStats||[],ct.filters.storeStats)}${numberControl('categoryTarget','bestEstDays','Days Total Best Estimate',ct.bestEstDays)}<button class="apply" data-apply="categoryTarget">APPLY</button></div><div class="chips"><span class="chip"><b>Section 3 only</b></span>${timeFactorChip(ct.period,'categoryTargetTimeFactor')}</div>`;
+  $('#categoryTargetFilters').innerHTML=`<div class="filter-grid">${rangeControl('categoryTarget','period','Actual Period',ct.period)}${multiControl('categoryTarget','channels','Channel',META.channels,ct.filters.channels,true)}${multiControl('categoryTarget','categories','Category',META.categories,ct.filters.categories,true)}${multiControl('categoryTarget','stores','Store',META.stores,ct.filters.stores,true)}${multiControl('categoryTarget','salesTypes','Sales Type',META.salesTypes,ct.filters.salesTypes)}${multiControl('categoryTarget','customerTypes','Customer Type',META.customerTypes||[],ct.filters.customerTypes)}${multiControl('categoryTarget','storeStats','Store Stat',META.storeStats||[],ct.filters.storeStats)}${numberControl('categoryTarget','bestEstDays','Days Total Best Estimate',ct.bestEstDays)}<button class="apply" data-apply="categoryTarget">APPLY</button></div><div class="chips"><span class="chip"><b>Section 3 only</b></span>${timeFactorChip(ct.period,'categoryTargetTimeFactor')}${activeFilterChips('categoryTarget')}</div>`;
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
@@ -488,19 +497,31 @@ function renderTargetCategory(d){
   const tf=Number.isFinite(Number(d.factor))?Number(d.factor):periodTimeFactor(S.categoryTarget.period).factor;
   const elapsed=Number.isFinite(Number(d.elapsedDays))?Number(d.elapsedDays):periodTimeFactor(S.categoryTarget.period).elapsed;
   const calendar=Number.isFinite(Number(d.calendarDays))?Number(d.calendarDays):periodTimeFactor(S.categoryTarget.period).calendar;
+
   const tfChip=$('#categoryTargetTimeFactor');
   if(tfChip)tfChip.innerHTML=`<b>Time Factor (MTD):</b> ${(tf*100).toFixed(1)}% <span class="chip-note">(${elapsed}/${calendar} days)</span>`;
 
-  let h=`<table class="sortable-table chart-table" data-chart-label="1" data-chart-cols="2,4,7" data-chart-series="Actual,Target MTD,Best Est"><thead><tr><th>No</th><th>CATEGORY</th><th>Sales<span class="period-sub">${rangeLabel(S.categoryTarget.period)}</span></th><th class="group-target">TARGET BEST EST<span class="period-sub">${d.month}</span></th><th class="group-target">TARGET BEST EST MTD<span class="period-sub">${d.month} • TF ${(tf*100).toFixed(1)}%</span></th><th>Achieve %</th><th>Achieve % MTD</th><th>BEST EST<span class="period-sub">${beDays} Days</span></th></tr></thead><tbody>`;
-  d.rows.forEach((r,i)=>h+=`<tr><td class="center">${i+1}</td><td>${esc(r.category)}</td><td class="num">${fmt(r.actual.sales)}</td><td class="num">${fmt(r.target)}</td><td class="num">${fmt(r.mtdTarget)}</td><td class="num ${r.achieve!==null&&r.achieve<.25?'target-alert':''}">${pct(r.achieve)}</td><td class="num">${pct(r.achieveMtd)}</td><td class="num">${fmt(r.bestEst)}</td></tr>`);
-  h+=`<tr class="total no-sort-row"><td colspan="2">TOTAL SALES</td><td class="num">${fmt(d.total.actual)}</td><td class="num">${fmt(d.total.target)}</td><td class="num">${fmt(d.total.mtdTarget)}</td><td class="num">${pct(d.total.achieve)}</td><td class="num">${pct(d.total.achieveMtd)}</td><td class="num">${fmt(d.total.bestEst)}</td></tr>
-  <tr class="summary-orange no-sort-row"><td colspan="2">TOTAL CATEGORY</td><td class="num">${fmt(d.total.actual)}</td><td class="num">${fmt(d.total.target)}</td><td class="num">${fmt(d.total.mtdTarget)}</td><td></td><td></td><td class="num">${fmt(d.total.bestEst)}</td></tr>
-  <tr class="no-sort-row"><td colspan="8">&nbsp;</td></tr>
-  <tr class="no-sort-row"><td colspan="2" class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(d.total.varianceTarget)}</td><td class="summary-blue num">${fmt(d.total.varianceMtd)}</td><td></td><td></td><td></td></tr>
-  <tr class="no-sort-row"><td colspan="2" class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(d.total.achieve)}</td><td class="summary-blue num">${pct(d.total.achieveMtd)}</td><td></td><td></td><td></td></tr></tbody></table>`;
+  let h=`<table class="sortable-table chart-table category-target-table" data-chart-label="1" data-chart-cols="2,4,9" data-chart-series="Actual,Target MTD,Best Est"><thead><tr><th class="no-col">No</th><th>CATEGORY</th><th>Sales<span class="period-sub">${rangeLabel(S.categoryTarget.period)}</span></th><th class="group-target">TARGET BEST EST<span class="period-sub">${d.month}</span></th><th class="group-target">TARGET BEST EST MTD<span class="period-sub">${d.month} • TF ${(tf*100).toFixed(1)}%</span></th><th>Achieve %</th><th>Achieve % MTD</th><th>OFFLINE SALES</th><th>ONLINE SALES</th><th>BEST EST<span class="period-sub">${beDays} Days</span></th><th>%Contr</th></tr></thead><tbody>`;
+
+  d.rows.forEach((r,i)=>{
+    h+=`<tr><td class="center no-col">${i+1}</td><td>${esc(r.category)}</td><td class="num">${fmt(r.actual.sales)}</td><td class="num">${fmt(r.target)}</td><td class="num">${fmt(r.mtdTarget)}</td><td class="num ${r.achieve!==null&&r.achieve<.25?'target-alert':''}">${pct(r.achieve)}</td><td class="num">${pct(r.achieveMtd)}</td><td class="num">${fmt(r.offlineSales)}</td><td class="num">${fmt(r.onlineSales)}</td><td class="num">${fmt(r.bestEst)}</td><td class="num">${pct(r.contribution)}</td></tr>`;
+  });
+
+  const ts=d.totalSales||{};
+  const tc=d.totalCategory||{};
+  const cp=d.categoryPct||{};
+
+  h+=`<tr class="total no-sort-row"><td colspan="2">TOTAL SALES</td><td class="num">${fmt(ts.actual)}</td><td class="num">${fmt(ts.target)}</td><td class="num">${fmt(ts.mtdTarget)}</td><td class="num">${pct(ts.achieve)}</td><td class="num">${pct(ts.achieveMtd)}</td><td class="num">${fmt(ts.offlineSales)}</td><td class="num">${fmt(ts.onlineSales)}</td><td class="num">${fmt(ts.bestEst)}</td><td class="num">${pct(ts.contribution)}</td></tr>
+  <tr class="summary-orange no-sort-row"><td colspan="2">TOTAL CATEGORY</td><td class="num">${fmt(tc.actual)}</td><td class="num">${fmt(tc.target)}</td><td class="num">${fmt(tc.mtdTarget)}</td><td></td><td></td><td class="num">${fmt(tc.offlineSales)}</td><td class="num">${fmt(tc.onlineSales)}</td><td class="num">${fmt(tc.bestEst)}</td><td class="num">${pct(tc.contribution)}</td></tr>
+  <tr class="summary-light no-sort-row"><td colspan="2">% CATEGORY</td><td class="num">${pct(cp.actual)}</td><td class="num">${pct(cp.target)}</td><td class="num">${pct(cp.mtdTarget)}</td><td></td><td></td><td></td><td></td><td class="num">${pct(cp.bestEst)}</td><td class="num">${pct(tc.contribution)}</td></tr>
+  <tr class="no-sort-row"><td colspan="11">&nbsp;</td></tr>
+  <tr class="no-sort-row"><td colspan="2" class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(tc.varianceTarget)}</td><td class="summary-blue num">${fmt(tc.varianceMtd)}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  <tr class="no-sort-row"><td colspan="2" class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(tc.achieve)}</td><td class="summary-blue num">${pct(tc.achieveMtd)}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>`;
+
   $('#categoryTargetTable').innerHTML=h;
   enhanceTable($('#categoryTargetTable table'));
 }
+
 
 function renderStore(d){
   const ps=periodsFor('store'),n=ps.length,order=n===3?[0,1,2]:[0,1];
