@@ -43,6 +43,22 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(MONTHLY_DIR, { recursive: true });
 
+const DEFAULT_CATEGORY_MAP = {
+  'OTC MEDICINE': 'OTC MEDICINE',
+  'VITAMIN - HEALTH SUPPLEMENTS': 'VITAMIN - HEALTH SUPPLEMENTS',
+  'HEALTH FOOD & NUTRITION': 'HEALTH FOOD & NUTRITION',
+  'PERSONAL CARE': 'PERSONAL CARE',
+  'PHARMA': 'PHARMA',
+  'HEALTH SUPPORT & REHAB': 'HEALTH SUPPORT & REHAB',
+  'GENERAL MERCHANDISE': 'GENERAL MERCHANDISE',
+  'OTHER MARKETING': 'OTHER',
+  'HEALTH SCREENING TEST': 'HEALTH SCREENING TEST',
+  'MERCHANDISE': 'OTHER',
+  'OTHER SERVICE': 'OTHER',
+  'VOUCHER PARTNERSHIP': 'OTHER',
+  '0': 'OTHER'
+};
+
 const DEFAULT_CONFIG = {
   channels: [
     { name: 'HALODOC', rawName: 'HALODOC', active: true, telemed: true, sort: 1 },
@@ -80,10 +96,8 @@ const DEFAULT_CONFIG = {
     { name: 'VETERAN', rawName: 'SLOC Shopee Veteran', pt: 'ESB', active: true },
     { name: 'PIK', rawName: 'SLOC Shopee PIK', pt: 'EFM', active: true }
   ],
-  categoryMap: {
-    'VOUCHER PARTNERSHIP': 'OTHER',
-    'OTHER MARKETING': 'OTHER'
-  },
+  categoryMap: { ...DEFAULT_CATEGORY_MAP },
+  categoryTargets: {},
   targets: {
     '2026-09': {
       'HALODOC': 651066376,
@@ -101,7 +115,7 @@ const DEFAULT_CONFIG = {
 
 let config = null;
 let rawRows = []; // legacy compatibility only; v22 no longer keeps all history in RAM.
-let metaIndex = { brands:[], categories:[], salesTypes:[], customerTypes:[], products:[] };
+let metaIndex = { brands:[], categories:[], rawCategories:[], salesTypes:[], customerTypes:[], products:[] };
 let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
 let monthIndex = {};
 
@@ -190,12 +204,13 @@ async function readRowsForPeriods(periods) {
 }
 
 function emptyMetaIndex(){
-  return {brands:[],categories:[],salesTypes:[],customerTypes:[],products:[]};
+  return {brands:[],categories:[],rawCategories:[],salesTypes:[],customerTypes:[],products:[]};
 }
 
 function mergeMetaRows(target,rows){
   const brands=new Set(target.brands||[]);
   const categories=new Set(target.categories||[]);
+  const rawCategories=new Set(target.rawCategories||[]);
   const salesTypes=new Set(target.salesTypes||[]);
   const customerTypes=new Set(target.customerTypes||[]);
   const products=new Map((target.products||[]).map(p=>[`${p.sku}|${p.itemName}`,p]));
@@ -203,6 +218,8 @@ function mergeMetaRows(target,rows){
   for(const r of rows||[]){
     if(r.brand) brands.add(r.brand);
     if(r.category) categories.add(r.category);
+    if(r.rawCategory) rawCategories.add(String(r.rawCategory).trim().toUpperCase());
+    else if(r.category) rawCategories.add(String(r.category).trim().toUpperCase());
     if(r.salesType) salesTypes.add(r.salesType);
     if(r.customerType && r.customerType!=='UNSPECIFIED') customerTypes.add(r.customerType);
 
@@ -217,6 +234,7 @@ function mergeMetaRows(target,rows){
   return {
     brands:[...brands].sort(),
     categories:[...categories].sort(),
+    rawCategories:[...rawCategories].sort(),
     salesTypes:[...salesTypes].sort(),
     customerTypes:[...customerTypes].sort(),
     products:[...products.values()]
@@ -300,6 +318,14 @@ async function bootstrap() {
     config = DEFAULT_CONFIG;
   }
 
+  // Backward-compatible Category mapping / Category Target migration.
+  let categoryConfigChanged=false;
+  config.categoryMap={...DEFAULT_CATEGORY_MAP,...(config.categoryMap||{})};
+  if(!config.categoryTargets || typeof config.categoryTargets!=='object'){
+    config.categoryTargets={};
+    categoryConfigChanged=true;
+  }
+
   // Backward-compatible Store Stat migration.
   // Existing masters created before v21 are treated as Existing Store.
   let configChanged=false;
@@ -310,7 +336,7 @@ async function bootstrap() {
     if (s.storeStatus!==normalizedStatus) configChanged=true;
     return {...s,storeStatus:normalizedStatus};
   });
-  if (configChanged || !(await fsp.access(CONFIG_FILE).then(()=>true).catch(()=>false))) {
+  if (configChanged || categoryConfigChanged || !(await fsp.access(CONFIG_FILE).then(()=>true).catch(()=>false))) {
     await writeJsonAtomic(CONFIG_FILE, config);
   }
 
@@ -339,6 +365,13 @@ async function bootstrap() {
   if(!metaIndex || !Array.isArray(metaIndex.products)){
     console.log('[META] rebuilding compact metadata index from monthly files...');
     await rebuildMetaIndexFromMonthly();
+  }
+  if(!Array.isArray(metaIndex.rawCategories)){
+    metaIndex.rawCategories=[...new Set([
+      ...Object.keys(config.categoryMap||{}),
+      ...(metaIndex.categories||[])
+    ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))].sort();
+    await writeJsonAtomic(META_INDEX_FILE,metaIndex);
   }
 
   let users = await readJson(USERS_FILE, null);
@@ -457,8 +490,25 @@ function effectiveStoreStatus(r) {
 }
 
 function mapCategory(raw) {
-  const key = String(raw || '').trim().toUpperCase();
+  const key = String(raw ?? '').trim().toUpperCase();
   return config.categoryMap[key] || key || 'OTHER';
+}
+
+function effectiveCategory(r) {
+  return mapCategory(r.rawCategory !== undefined && r.rawCategory !== null ? r.rawCategory : r.category);
+}
+
+function knownRawCategories() {
+  return [...new Set([
+    ...Object.keys(DEFAULT_CATEGORY_MAP),
+    ...Object.keys(config.categoryMap||{}),
+    ...(metaIndex.rawCategories||[]),
+    ...(metaIndex.categories||[])
+  ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))].sort();
+}
+
+function mappedCategoryList() {
+  return [...new Set(knownRawCategories().map(mapCategory).filter(Boolean))].sort();
 }
 
 function activeChannels() {
@@ -502,6 +552,7 @@ function normalizeRow(r) {
     newItemCode: String(r.new_item_code || '').trim(),
     itemName: String(r.item_name || '').trim(),
     brand: String(r.brand || '').trim() || 'UNBRANDED',
+    rawCategory: String(r.category_2 ?? '').trim().toUpperCase(),
     category: mapCategory(r.category_2),
     customerType: String(r.customer_type || '').trim() || 'UNSPECIFIED',
     salesType: String(r.trader_check || '').trim() || 'Regular',
@@ -866,7 +917,18 @@ function redecorateRow(r) {
   const rawStore = r.rawStore || r.store;
   const rawChannel = r.rawChannel || r.channel;
   const store = canonicalStore(rawStore);
-  return { ...r, rawStore, rawChannel, store: store.name, pt: store.pt, storeStat: store.storeStatus, channel: canonicalChannel(rawChannel) };
+  const rawCategory=r.rawCategory!==undefined?r.rawCategory:r.category;
+  return {
+    ...r,
+    rawStore,
+    rawChannel,
+    rawCategory,
+    category:mapCategory(rawCategory),
+    store:store.name,
+    pt:store.pt,
+    storeStat:store.storeStatus,
+    channel:canonicalChannel(rawChannel)
+  };
 }
 
 async function redecorateAllRows() {
@@ -889,7 +951,7 @@ function filterBase(sourceRows, filters = {}) {
   return sourceRows.filter(r => {
     if (stores.length && !stores.includes(String(r.store).toUpperCase())) return false;
     if (pts.length && !pts.includes(String(r.pt).toUpperCase())) return false;
-    if (categories.length && !categories.includes(String(r.category).toUpperCase())) return false;
+    if (categories.length && !categories.includes(effectiveCategory(r).toUpperCase())) return false;
     if (brands.length && !brands.includes(String(r.brand).toUpperCase())) return false;
     if (salesTypes.length && !salesTypes.includes(String(r.salesType).toUpperCase())) return false;
     if (customerTypes.length && !customerTypes.includes(String(r.customerType || 'UNSPECIFIED').toUpperCase())) return false;
@@ -901,11 +963,21 @@ function filterBase(sourceRows, filters = {}) {
 }
 
 function metrics(rows) {
-  let sales = 0;
+  let sales = 0, qty = 0;
   const invoices = new Set();
-  for (const r of rows) { sales += r.sales; if (r.invoice) invoices.add(r.invoice); }
+  for (const r of rows) {
+    sales += safeNum(r.sales);
+    qty += safeNum(r.qty);
+    if (r.invoice) invoices.add(r.invoice);
+  }
   const trx = invoices.size;
-  return { sales, trx, basket: trx ? sales / trx : 0 };
+  return {
+    sales,
+    qty,
+    trx,
+    basket: trx ? sales / trx : 0,
+    basketQty: trx ? qty / trx : 0
+  };
 }
 
 function metricsByPeriod(rows, periods) {
@@ -996,7 +1068,64 @@ function targetQuery(sourceRows, period, filters, daysTotalBestEstimate) {
   };
 }
 
-function storeQuery(sourceRows, periods, filters) {
+
+function targetCategoryQuery(sourceRows, period, filters, daysTotalBestEstimate) {
+  const base=filterBase(sourceRows,filters).filter(r=>rowInPeriod(r,period));
+  const key=monthKey(period.end);
+  const targetMap=config.categoryTargets?.[key]||{};
+  const elapsedDays=daysInclusive(period.start,period.end);
+  const calendarDays=daysInMonth(period.end);
+
+  let bestEstDays=Number(daysTotalBestEstimate);
+  if(!Number.isFinite(bestEstDays) || bestEstDays<=0) bestEstDays=calendarDays;
+  bestEstDays=Math.max(0.5,Math.min(31.5,bestEstDays));
+
+  const factor=elapsedDays/calendarDays;
+  const bestEstFactor=elapsedDays>0?bestEstDays/elapsedDays:0;
+  const categories=mappedCategoryList();
+
+  const rows=categories.map(category=>{
+    const actual=metrics(base.filter(r=>effectiveCategory(r)===category));
+    const target=safeNum(targetMap[category]);
+    const mtdTarget=target*factor;
+    const bestEst=actual.sales*bestEstFactor;
+    return {
+      category,
+      actual,
+      target,
+      mtdTarget,
+      achieve:pct(actual.sales,target),
+      achieveMtd:pct(actual.sales,mtdTarget),
+      bestEst
+    };
+  });
+
+  const totalActual=metrics(base);
+  const totalTarget=rows.reduce((a,x)=>a+x.target,0);
+  const totalMtdTarget=rows.reduce((a,x)=>a+x.mtdTarget,0);
+  const totalBestEst=rows.reduce((a,x)=>a+x.bestEst,0);
+
+  return {
+    month:key,
+    factor,
+    elapsedDays,
+    calendarDays,
+    bestEstDays,
+    rows,
+    total:{
+      actual:totalActual.sales,
+      target:totalTarget,
+      mtdTarget:totalMtdTarget,
+      achieve:pct(totalActual.sales,totalTarget),
+      achieveMtd:pct(totalActual.sales,totalMtdTarget),
+      bestEst:totalBestEst,
+      varianceTarget:totalActual.sales-totalTarget,
+      varianceMtd:totalActual.sales-totalMtdTarget
+    }
+  };
+}
+
+function storeQuery(sourceRows, periods, filters, metricMode='value') {
   const base = filterBase(sourceRows,filters);
   const active = config.stores.filter(s=>s.active);
   const unique = new Map();
@@ -1016,15 +1145,25 @@ function storeQuery(sourceRows, periods, filters) {
   const total = metricsByPeriod(base.filter(r=>stores.some(s=>s.name===r.store)),periods);
   const variance = periods.map((_,i)=> i===periods.length-1 ? null : ({
     sales: total[i].sales-total[i+1].sales,
+    qty: total[i].qty-total[i+1].qty,
     trx: total[i].trx-total[i+1].trx,
     basket: total[i].basket-total[i+1].basket,
+    basketQty: total[i].basketQty-total[i+1].basketQty,
     salesPct: diffPct(total[i].sales,total[i+1].sales),
+    qtyPct: diffPct(total[i].qty,total[i+1].qty),
     trxPct: diffPct(total[i].trx,total[i+1].trx),
-    basketPct: diffPct(total[i].basket,total[i+1].basket)
+    basketPct: diffPct(total[i].basket,total[i+1].basket),
+    basketQtyPct: diffPct(total[i].basketQty,total[i+1].basketQty)
   }));
-  const avgPerDay = total.map((m,i)=>({ sales:m.sales/daysInclusive(periods[i].start,periods[i].end), trx:m.trx/daysInclusive(periods[i].start,periods[i].end), basket:m.basket }));
+  const avgPerDay = total.map((m,i)=>({
+    sales:m.sales/daysInclusive(periods[i].start,periods[i].end),
+    qty:m.qty/daysInclusive(periods[i].start,periods[i].end),
+    trx:m.trx/daysInclusive(periods[i].start,periods[i].end),
+    basket:m.basket,
+    basketQty:m.basketQty
+  }));
   const ptTotals = ['EFM','EFIT','ESB'].map(pt=>({ pt, periods:metricsByPeriod(base.filter(r=>r.pt===pt && stores.some(s=>s.name===r.store)), periods) }));
-  return { rows, total, variance, avgPerDay, ptTotals };
+  return { rows, total, variance, avgPerDay, ptTotals, metricMode:metricMode==='qty'?'qty':'value' };
 }
 
 function groupBy(rows, keyFn) {
@@ -1033,38 +1172,67 @@ function groupBy(rows, keyFn) {
   return map;
 }
 
-function brandQuery(sourceRows, periods, filters, topN) {
-  const base = filterBase(sourceRows,filters);
-  const brands = groupBy(base, r=>r.brand || 'UNBRANDED');
-  let rows = [...brands.entries()].map(([brand,rr])=>({ brand, periods:metricsByPeriod(rr,periods) }));
-  rows.sort((a,b)=>b.periods[0].sales-a.periods[0].sales);
-  const totalAll = metricsByPeriod(base, periods);
-  const shown = rows.slice(0, topN);
-  const totalDisplayed = periods.map((_,i)=>shown.reduce((acc,x)=>({ sales:acc.sales+x.periods[i].sales, trx:0, basket:0 }),{sales:0,trx:0,basket:0}));
+function brandQuery(sourceRows, periods, filters, topN, metricMode='value') {
+  const base=filterBase(sourceRows,filters);
+  const metricKey=metricMode==='qty'?'qty':'sales';
+  const brands=groupBy(base,r=>r.brand||'UNBRANDED');
+  let rows=[...brands.entries()].map(([brand,rr])=>({brand,periods:metricsByPeriod(rr,periods)}));
+  rows.sort((a,b)=>safeNum(b.periods[0][metricKey])-safeNum(a.periods[0][metricKey]));
+  const totalAll=metricsByPeriod(base,periods);
+  const shown=rows.slice(0,topN);
+  const totalDisplayed=periods.map((_,i)=>({
+    sales:shown.reduce((a,x)=>a+safeNum(x.periods[i].sales),0),
+    qty:shown.reduce((a,x)=>a+safeNum(x.periods[i].qty),0),
+    trx:0,basket:0,basketQty:0
+  }));
   return {
-    rows: shown.map(x=>({ ...x, growthP1:x.periods[1]?x.periods[0].sales-x.periods[1].sales:null, growthP2:x.periods[2]?x.periods[0].sales-x.periods[2].sales:null, share:pct(x.periods[0].sales,totalAll[0].sales) })),
+    metricMode:metricMode==='qty'?'qty':'value',
+    rows:shown.map(x=>({
+      ...x,
+      growthP1:x.periods[1]?safeNum(x.periods[0][metricKey])-safeNum(x.periods[1][metricKey]):null,
+      growthP2:x.periods[2]?safeNum(x.periods[0][metricKey])-safeNum(x.periods[2][metricKey]):null,
+      share:pct(safeNum(x.periods[0][metricKey]),safeNum(totalAll[0][metricKey]))
+    })),
     totalAll,
     totalDisplayed,
-    displayedShare: totalDisplayed.map((m,i)=>pct(m.sales,totalAll[i].sales))
+    displayedShare:totalDisplayed.map((m,i)=>pct(safeNum(m[metricKey]),safeNum(totalAll[i][metricKey])))
   };
 }
 
-function itemQuery(sourceRows, periods, filters, topN) {
-  const base = filterBase(sourceRows,filters);
-  const groups = groupBy(base, r=>`${String(r.newItemCode || r.sku || '').trim()}|||${r.itemName}|||${r.brand}`);
-  const all = [...groups.entries()].map(([key,rr])=>{
-    const [sku,itemName,brand] = key.split('|||');
-    const m = metricsByPeriod(rr,periods);
-    return { sku,itemName,brand,periods:m,growthP1:m[1]?m[0].sales-m[1].sales:m[0].sales,growthP2:m[2]?m[0].sales-m[2].sales:null };
+function itemQuery(sourceRows, periods, filters, topN, metricMode='value') {
+  const base=filterBase(sourceRows,filters);
+  const metricKey=metricMode==='qty'?'qty':'sales';
+  const groups=groupBy(base,r=>`${String(r.newItemCode||r.sku||'').trim()}|||${r.itemName}|||${r.brand}`);
+  const all=[...groups.entries()].map(([key,rr])=>{
+    const [sku,itemName,brand]=key.split('|||');
+    const m=metricsByPeriod(rr,periods);
+    return {
+      sku,itemName,brand,periods:m,
+      growthP1:m[1]?safeNum(m[0][metricKey])-safeNum(m[1][metricKey]):safeNum(m[0][metricKey]),
+      growthP2:m[2]?safeNum(m[0][metricKey])-safeNum(m[2][metricKey]):null
+    };
   });
-  const topGrowth = [...all].sort((a,b)=>b.growthP1-a.growthP1).slice(0,topN);
-  const topDecline = [...all].sort((a,b)=>a.growthP1-b.growthP1).slice(0,topN);
-  const totalAll = metricsByPeriod(base,periods);
+  const topGrowth=[...all].sort((a,b)=>b.growthP1-a.growthP1).slice(0,topN);
+  const topDecline=[...all].sort((a,b)=>a.growthP1-b.growthP1).slice(0,topN);
+  const totalAll=metricsByPeriod(base,periods);
   function summarize(list){
-    const totalDisplayed=periods.map((_,i)=>({sales:list.reduce((a,x)=>a+x.periods[i].sales,0),trx:0,basket:0}));
-    return { rows:list, totalDisplayed, displayedShare:totalDisplayed.map((m,i)=>pct(m.sales,totalAll[i].sales)) };
+    const totalDisplayed=periods.map((_,i)=>({
+      sales:list.reduce((a,x)=>a+safeNum(x.periods[i].sales),0),
+      qty:list.reduce((a,x)=>a+safeNum(x.periods[i].qty),0),
+      trx:0,basket:0,basketQty:0
+    }));
+    return {
+      rows:list,
+      totalDisplayed,
+      displayedShare:totalDisplayed.map((m,i)=>pct(safeNum(m[metricKey]),safeNum(totalAll[i][metricKey])))
+    };
   }
-  return { topGrowth:summarize(topGrowth), topDecline:summarize(topDecline), totalAll };
+  return {
+    metricMode:metricMode==='qty'?'qty':'value',
+    topGrowth:summarize(topGrowth),
+    topDecline:summarize(topDecline),
+    totalAll
+  };
 }
 
 
@@ -1155,7 +1323,8 @@ app.get('/api/meta', requireAuth, (req,res)=>{
     stores,
     pts:['EFM','EFIT','ESB'],
     storeStats:['Existing Store','New Store'],
-    categories:metaIndex.categories||[],
+    categories:mappedCategoryList(),
+    rawCategories:knownRawCategories(),
     brands:metaIndex.brands||[],
     salesTypes:metaIndex.salesTypes||[],
     customerTypes:metaIndex.customerTypes||[],
@@ -1200,11 +1369,21 @@ app.post('/api/query/target', requireAuth, async (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
+app.post('/api/query/target-category', requireAuth, async (req,res)=>{
+  try {
+    const period=normalizePeriods([req.body.period])[0];
+    const rows=await readRowsForPeriods([period]);
+    res.json(targetCategoryQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate));
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
+});
+
+
 app.post('/api/query/store', requireAuth, async (req,res)=>{
   try {
     const periods=normalizePeriods(req.body.periods);
     const rows=await readRowsForPeriods(periods);
-    res.json(storeQuery(rows,periods,req.body.filters||{}));
+    res.json(storeQuery(rows,periods,req.body.filters||{},req.body.metricMode));
   }
   catch(e){ res.status(400).json({error:e.message}); }
 });
@@ -1214,7 +1393,7 @@ app.post('/api/query/brand', requireAuth, async (req,res)=>{
     const periods=normalizePeriods(req.body.periods);
     const rows=await readRowsForPeriods(periods);
     const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10)));
-    res.json(brandQuery(rows,periods,req.body.filters||{},n));
+    res.json(brandQuery(rows,periods,req.body.filters||{},n,req.body.metricMode));
   }
   catch(e){ res.status(400).json({error:e.message}); }
 });
@@ -1224,7 +1403,7 @@ app.post('/api/query/items', requireAuth, async (req,res)=>{
     const periods=normalizePeriods(req.body.periods);
     const rows=await readRowsForPeriods(periods);
     const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10)));
-    res.json(itemQuery(rows,periods,req.body.filters||{},n));
+    res.json(itemQuery(rows,periods,req.body.filters||{},n,req.body.metricMode));
   }
   catch(e){ res.status(400).json({error:e.message}); }
 });
@@ -1358,8 +1537,12 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
   config={
     channels:incoming.channels.map((c,i)=>({name:String(c.name||'').trim().toUpperCase(),rawName:String(c.rawName||c.name||'').trim().toUpperCase(),active:!!c.active,telemed:!!c.telemed,sort:Number(c.sort||i+1)})).filter(c=>c.name&&c.rawName),
     stores:normalizedStores,
-    categoryMap:incoming.categoryMap&&typeof incoming.categoryMap==='object'?incoming.categoryMap:{},
+    categoryMap:Object.fromEntries(Object.entries(incoming.categoryMap&&typeof incoming.categoryMap==='object'?incoming.categoryMap:{}).map(([k,v])=>[
+      String(k).trim().toUpperCase(),
+      String(v||k).trim().toUpperCase()
+    ]).filter(([k,v])=>k&&v)),
     targets:incoming.targets&&typeof incoming.targets==='object'?incoming.targets:{},
+    categoryTargets:incoming.categoryTargets&&typeof incoming.categoryTargets==='object'?incoming.categoryTargets:{},
     rankingDefault:Math.max(1,Math.min(10,Number(incoming.rankingDefault||10)))
   };
   await writeJsonAtomic(CONFIG_FILE,config);
@@ -1441,4 +1624,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | Monthly closing: disabled`)));
