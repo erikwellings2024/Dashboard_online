@@ -494,3 +494,13 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
     grid-template-columns:repeat(5,minmax(155px,1fr));
   }
 }
+
+
+/* v20 — Section 2 time factor */
+#targetTimeFactor{
+  background:#eef5fb;
+  border-color:#b7cde0;
+  color:#2f5979;
+}
+#targetTimeFactor b{color:#244b69}
+.chip-note{color:#697786;font-weight:400}

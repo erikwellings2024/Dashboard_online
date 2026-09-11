@@ -17,6 +17,17 @@ function daysInMonthISO(iso){
   const d=parseISO(iso);
   return new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
 }
+function periodTimeFactor(period){
+  const a=parseISO(period.start),b=parseISO(period.end);
+  const elapsed=Math.max(1,Math.round((b-a)/86400000)+1);
+  const calendar=daysInMonthISO(period.end);
+  return {elapsed,calendar,factor:elapsed/calendar};
+}
+function timeFactorChip(period){
+  const x=periodTimeFactor(period);
+  return `<span class="chip" id="targetTimeFactor"><b>Time Factor (MTD):</b> ${(x.factor*100).toFixed(1)}% <span class="chip-note">(${x.elapsed}/${x.calendar} days)</span></span>`;
+}
+
 function monthRange(iso,offset=0){const d=parseISO(iso);d.setMonth(d.getMonth()+offset);const y=d.getFullYear(),m=d.getMonth();const a=new Date(y,m,1),b=new Date(y,m+1,0);return{start:localISO(a),end:localISO(b)}}
 function defaultPeriods(){const today=localISO(new Date());const max=META.maxDate||today;const current={start:max.slice(0,8)+'01',end:max};return[current,monthRange(max,-1),monthRange(max,-2)]}
 function all(arr,key){return arr.map(x=>key?x[key]:x)}
@@ -123,7 +134,7 @@ function renderFilters(){
 
   const t=S.target;
   // Section 2: Channel and Brand filters intentionally removed.
-  $('#targetFilters').innerHTML=`<div class="filter-grid">${rangeControl('target','period','Actual Period',t.period)}${multiControl('target','stores','Store',META.stores,t.filters.stores,true)}${multiControl('target','salesTypes','Sales Type',META.salesTypes,t.filters.salesTypes)}${numberControl('target','bestEstDays','Days Total Best Estimate',t.bestEstDays)}<button class="apply" data-apply="target">APPLY</button></div><div class="chips"><span class="chip"><b>Section 2 only</b></span></div>`;
+  $('#targetFilters').innerHTML=`<div class="filter-grid">${rangeControl('target','period','Actual Period',t.period)}${multiControl('target','stores','Store',META.stores,t.filters.stores,true)}${multiControl('target','salesTypes','Sales Type',META.salesTypes,t.filters.salesTypes)}${numberControl('target','bestEstDays','Days Total Best Estimate',t.bestEstDays)}<button class="apply" data-apply="target">APPLY</button></div><div class="chips"><span class="chip"><b>Section 2 only</b></span>${timeFactorChip(t.period)}</div>`;
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
@@ -285,6 +296,15 @@ $$('.prev2-show').forEach(btn=>btn.onclick=e=>{
 });
 $$('[data-apply]').forEach(b=>b.onclick=()=>{
   const sec=b.dataset.apply;
+
+  if(sec==='target'){
+    const inp=$('.number-input[data-section="target"][data-key="bestEstDays"]');
+    if(inp){
+      const n=Number(inp.value);
+      if(Number.isFinite(n)&&n>0) S.target.bestEstDays=n;
+    }
+  }
+
   renderFilters();
   loadSection(sec);
 });
@@ -414,7 +434,25 @@ h+=`<tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td>${d.telemed.map
 h+=`<tr class="summary-light no-sort-row"><td>% TELEMED</td>${d.telemedPct.map(m=>`<td class="num">${pct(m.sales)}</td><td class="num">${pct(m.trx)}</td><td class="num">${pct(m.basket)}</td>`).join('')}<td colspan="${n===3?6:3}"></td></tr>`;
 let vv='<tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td>',vp='<tr class="no-sort-row"><td class="summary-blue">Variance %</td>';for(let i=0;i<n;i++){const v=d.variance[i];if(v){vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`}else{vv+='<td></td><td></td><td></td>';vp+='<td></td><td></td><td></td>'}}h+=vv+`<td colspan="${n===3?6:3}"></td></tr>`+vp+`<td colspan="${n===3?6:3}"></td></tr></tbody></table>`;$('#channelTable').innerHTML=h;const t=$('#channelTable table');t.dataset.chartCols=n===3?'1,4,7':'1,4';t.dataset.chartSeries=n===3?'Current,Previous 1,Previous 2':'Current,Previous 1';enhanceTable(t)}
 
-function renderTarget(d){let h=`<table class="sortable-table chart-table" data-chart-label="0" data-chart-cols="1,3,6" data-chart-series="Actual,Target MTD,Best Est"><thead><tr><th>CHANNEL</th><th>Sales<span class="period-sub">${rangeLabel(S.target.period)}</span></th><th class="group-target">TARGET BEST EST<span class="period-sub">${d.month}</span></th><th class="group-target">TARGET BEST EST MTD<span class="period-sub">${d.month}</span></th><th>Achieve %</th><th>Achieve % MTD</th><th>BEST EST<span class="period-sub">${d.bestEstDays} Days</span></th></tr></thead><tbody>`;for(const r of d.rows)h+=`<tr><td>${esc(r.channel)}</td><td class="num">${fmt(r.actual.sales)}</td><td class="num">${fmt(r.target)}</td><td class="num">${fmt(r.mtdTarget)}</td><td class="num ${r.achieve!==null&&r.achieve<.25?'target-alert':''}">${pct(r.achieve)}</td><td class="num">${pct(r.achieveMtd)}</td><td class="num">${fmt(r.bestEst)}</td></tr>`;h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td><td class="num">${fmt(d.total.actual)}</td><td class="num">${fmt(d.total.target)}</td><td class="num">${fmt(d.total.mtdTarget)}</td><td class="num">${pct(d.total.achieve)}</td><td class="num">${pct(d.total.achieveMtd)}</td><td class="num">${fmt(d.total.bestEst)}</td></tr><tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td><td class="num">${fmt(d.telemed.actual)}</td><td class="num">${fmt(d.telemed.target)}</td><td class="num">${fmt(d.telemed.mtdTarget)}</td><td></td><td></td><td class="num">${fmt(d.telemed.bestEst)}</td></tr><tr class="summary-light no-sort-row"><td>% TELEMED</td><td class="num">${pct(d.telemed.pctActual)}</td><td class="num">${pct(d.telemed.pctTarget)}</td><td></td><td></td><td></td><td class="num">${pct(d.telemed.pctBestEst)}</td></tr><tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(d.telemed.varianceTarget)}</td><td class="summary-blue num">${fmt(d.telemed.varianceMtd)}</td><td></td><td></td><td></td></tr><tr class="no-sort-row"><td class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(d.telemed.achieveTarget)}</td><td class="summary-blue num">${pct(d.telemed.achieveMtd)}</td><td></td><td></td><td></td></tr></tbody></table>`;$('#targetTable').innerHTML=h;enhanceTable($('#targetTable table'))}
+function renderTarget(d){
+  const beDays=Number.isFinite(Number(d.bestEstDays))?Number(d.bestEstDays):Number(S.target.bestEstDays||daysInMonthISO(S.target.period.end));
+  const tf=Number.isFinite(Number(d.factor))?Number(d.factor):periodTimeFactor(S.target.period).factor;
+  const elapsed=Number.isFinite(Number(d.elapsedDays))?Number(d.elapsedDays):periodTimeFactor(S.target.period).elapsed;
+  const calendar=Number.isFinite(Number(d.calendarDays))?Number(d.calendarDays):periodTimeFactor(S.target.period).calendar;
+
+  const tfChip=$('#targetTimeFactor');
+  if(tfChip)tfChip.innerHTML=`<b>Time Factor (MTD):</b> ${(tf*100).toFixed(1)}% <span class="chip-note">(${elapsed}/${calendar} days)</span>`;
+
+  let h=`<table class="sortable-table chart-table" data-chart-label="0" data-chart-cols="1,3,6" data-chart-series="Actual,Target MTD,Best Est"><thead><tr><th>CHANNEL</th><th>Sales<span class="period-sub">${rangeLabel(S.target.period)}</span></th><th class="group-target">TARGET BEST EST<span class="period-sub">${d.month}</span></th><th class="group-target">TARGET BEST EST MTD<span class="period-sub">${d.month} • TF ${(tf*100).toFixed(1)}%</span></th><th>Achieve %</th><th>Achieve % MTD</th><th>BEST EST<span class="period-sub">${beDays} Days</span></th></tr></thead><tbody>`;
+
+  for(const r of d.rows)h+=`<tr><td>${esc(r.channel)}</td><td class="num">${fmt(r.actual.sales)}</td><td class="num">${fmt(r.target)}</td><td class="num">${fmt(r.mtdTarget)}</td><td class="num ${r.achieve!==null&&r.achieve<.25?'target-alert':''}">${pct(r.achieve)}</td><td class="num">${pct(r.achieveMtd)}</td><td class="num">${fmt(r.bestEst)}</td></tr>`;
+
+  h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td><td class="num">${fmt(d.total.actual)}</td><td class="num">${fmt(d.total.target)}</td><td class="num">${fmt(d.total.mtdTarget)}</td><td class="num">${pct(d.total.achieve)}</td><td class="num">${pct(d.total.achieveMtd)}</td><td class="num">${fmt(d.total.bestEst)}</td></tr><tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td><td class="num">${fmt(d.telemed.actual)}</td><td class="num">${fmt(d.telemed.target)}</td><td class="num">${fmt(d.telemed.mtdTarget)}</td><td></td><td></td><td class="num">${fmt(d.telemed.bestEst)}</td></tr><tr class="summary-light no-sort-row"><td>% TELEMED</td><td class="num">${pct(d.telemed.pctActual)}</td><td class="num">${pct(d.telemed.pctTarget)}</td><td></td><td></td><td></td><td class="num">${pct(d.telemed.pctBestEst)}</td></tr><tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(d.telemed.varianceTarget)}</td><td class="summary-blue num">${fmt(d.telemed.varianceMtd)}</td><td></td><td></td><td></td></tr><tr class="no-sort-row"><td class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(d.telemed.achieveTarget)}</td><td class="summary-blue num">${pct(d.telemed.achieveMtd)}</td><td></td><td></td><td></td></tr></tbody></table>`;
+
+  $('#targetTable').innerHTML=h;
+  enhanceTable($('#targetTable table'));
+}
+
 
 function renderStore(d){const ps=periodsFor('store'),n=ps.length;const order=n===3?[0,1,2]:[0,1];let h=`<table class="sortable-table chart-table" data-chart-label="1"><thead><tr><th rowspan="2">PT</th><th rowspan="2">STORE</th><th colspan="${n}">SALES</th><th colspan="${n}">TRX</th><th colspan="${n}">BASKET SIZE</th></tr><tr>${['Sales','Trx','Basket'].map(()=>order.map(i=>`<th>${i===0?'Current':'Previous '+i}<span class="period-sub">${rangeLabel(ps[i])}</span></th>`).join('')).join('')}</tr></thead><tbody>`;for(const r of d.rows){h+=`<tr><td>${esc(r.pt)}</td><td>${esc(r.store)}</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt([r.periods[i].sales,r.periods[i].trx,r.periods[i].basket][metric])}</td>`).join('')).join('')}</tr>`}h+=`<tr class="total no-sort-row"><td colspan="2">ALL STORE</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt([d.total[i].sales,d.total[i].trx,d.total[i].basket][metric])}</td>`).join('')).join('')}</tr>`;
 for(const [label,key,cls] of [['Variance Value','value','summary-blue-label'],['Variance %','pct','summary-blue'],['Avg Per Day','avg','']]){h+=`<tr class="${label==='Avg Per Day'?'avg-row ':''}no-sort-row"><td colspan="2" class="${cls}">${label}</td>`;for(let metric=0;metric<3;metric++){for(const i of order){let v='-';if(label==='Avg Per Day')v=fmt([d.avgPerDay[i].sales,d.avgPerDay[i].trx,d.avgPerDay[i].basket][metric]);else if(i<d.variance.length&&d.variance[i])v=label==='Variance Value'?fmt([d.variance[i].sales,d.variance[i].trx,d.variance[i].basket][metric]):fp([d.variance[i].salesPct,d.variance[i].trxPct,d.variance[i].basketPct][metric]);h+=`<td class="num ${label!=='Avg Per Day'?'summary-blue':''}">${v}</td>`}}h+='</tr>'}
