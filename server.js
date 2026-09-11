@@ -138,6 +138,72 @@ let metaIndex = { brands:[], categories:[], rawCategories:[], salesTypes:[], cus
 let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
 let monthIndex = {};
 
+
+// v26: keep heavy dashboard aggregation memory-safe for multiple simultaneous users.
+// Railway Free/Trial RAM is limited, so only one raw-data aggregation runs at a time.
+const QUERY_CONCURRENCY = Math.max(1, Number(process.env.QUERY_CONCURRENCY || 1));
+const QUERY_CACHE_TTL_MS = Math.max(5000, Number(process.env.QUERY_CACHE_TTL_MS || 60000));
+const QUERY_CACHE_MAX = Math.max(10, Number(process.env.QUERY_CACHE_MAX || 60));
+let activeHeavyQueries = 0;
+const heavyQueryQueue = [];
+const queryResultCache = new Map();
+let queryRevision = 1;
+
+function withHeavyQuerySlot(fn){
+  return new Promise((resolve,reject)=>{
+    const job=async()=>{
+      activeHeavyQueries++;
+      try{resolve(await fn())}
+      catch(e){reject(e)}
+      finally{
+        activeHeavyQueries--;
+        const next=heavyQueryQueue.shift();
+        if(next)next();
+      }
+    };
+    if(activeHeavyQueries<QUERY_CONCURRENCY)job();
+    else heavyQueryQueue.push(job);
+  });
+}
+
+function queryCacheKey(name,body){
+  return `${queryRevision}|${name}|${JSON.stringify(body||{})}`;
+}
+
+function pruneQueryCache(){
+  const now=Date.now();
+  for(const [k,v] of queryResultCache){
+    if(now-v.at>QUERY_CACHE_TTL_MS)queryResultCache.delete(k);
+  }
+  while(queryResultCache.size>QUERY_CACHE_MAX){
+    const first=queryResultCache.keys().next().value;
+    if(first===undefined)break;
+    queryResultCache.delete(first);
+  }
+}
+
+async function runHeavyQuery(name,body,fn){
+  pruneQueryCache();
+  const key=queryCacheKey(name,body);
+  const hit=queryResultCache.get(key);
+  if(hit && Date.now()-hit.at<=QUERY_CACHE_TTL_MS)return hit.value;
+
+  return withHeavyQuerySlot(async()=>{
+    // Re-check after waiting: another user may have computed the same view.
+    const second=queryResultCache.get(key);
+    if(second && Date.now()-second.at<=QUERY_CACHE_TTL_MS)return second.value;
+    const value=await fn();
+    queryResultCache.set(key,{at:Date.now(),value});
+    pruneQueryCache();
+    return value;
+  });
+}
+
+function invalidateQueryCache(){
+  queryRevision++;
+  queryResultCache.clear();
+}
+
 async function readJson(file, fallback) {
   try { return JSON.parse(await fsp.readFile(file, 'utf8')); }
   catch { return fallback; }
@@ -1573,59 +1639,70 @@ app.get('/api/meta/products', requireAuth, (req,res)=>{
 
 app.post('/api/query/channel', requireAuth, async (req,res)=>{
   try {
-    const periods=normalizePeriods(req.body.periods);
-    const rows=await readRowsForPeriods(periods);
-    res.json(channelQuery(rows,periods,req.body.filters||{}));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('channel',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      return channelQuery(rows,periods,req.body.filters||{});
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.post('/api/query/target', requireAuth, async (req,res)=>{
   try {
-    const period=normalizePeriods([req.body.period])[0];
-    const rows=await readRowsForPeriods([period]);
-    res.json(targetQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('target',req.body,async()=>{
+      const period=normalizePeriods([req.body.period])[0];
+      const rows=await readRowsForPeriods([period]);
+      return targetQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate);
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.post('/api/query/target-category', requireAuth, async (req,res)=>{
   try {
-    const period=normalizePeriods([req.body.period])[0];
-    const rows=await readRowsForPeriods([period]);
-    res.json(targetCategoryQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('target-category',req.body,async()=>{
+      const period=normalizePeriods([req.body.period])[0];
+      const rows=await readRowsForPeriods([period]);
+      return targetCategoryQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate);
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
-
 
 app.post('/api/query/store', requireAuth, async (req,res)=>{
   try {
-    const periods=normalizePeriods(req.body.periods);
-    const rows=await readRowsForPeriods(periods);
-    res.json(storeQuery(rows,periods,req.body.filters||{},req.body.metricMode));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('store',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      return storeQuery(rows,periods,req.body.filters||{},req.body.metricMode);
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.post('/api/query/brand', requireAuth, async (req,res)=>{
   try {
-    const periods=normalizePeriods(req.body.periods);
-    const rows=await readRowsForPeriods(periods);
-    const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10)));
-    res.json(brandQuery(rows,periods,req.body.filters||{},n,req.body.metricMode));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('brand',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10)));
+      return brandQuery(rows,periods,req.body.filters||{},n,req.body.metricMode);
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.post('/api/query/items', requireAuth, async (req,res)=>{
   try {
-    const periods=normalizePeriods(req.body.periods);
-    const rows=await readRowsForPeriods(periods);
-    const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10)));
-    res.json(itemQuery(rows,periods,req.body.filters||{},n,req.body.metricMode));
-  }
-  catch(e){ res.status(400).json({error:e.message}); }
+    const result=await runHeavyQuery('items',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10)));
+      return itemQuery(rows,periods,req.body.filters||{},n,req.body.metricMode);
+    });
+    res.json(result);
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.get('/api/admin/upload-policy', requireAdmin, (req,res)=>res.json(uploadPolicy()));
@@ -1713,6 +1790,7 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     };
     appendUploadHistory(entry);
     await writeJsonAtomic(RUNTIME_FILE,runtime);
+    invalidateQueryCache();
 
     res.json({
       ok:true,mode:'monthly_replace',targetMonth,
@@ -1771,6 +1849,7 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
     rankingDefault:Math.max(1,Math.min(10,Number(incoming.rankingDefault||10)))
   };
   await writeJsonAtomic(CONFIG_FILE,config);
+  invalidateQueryCache();
   // No historical rewrite required. Master mapping is applied dynamically
   // when dashboard rows are queried.
   res.json({ok:true,config});
@@ -1849,4 +1928,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue: 1 + result cache: enabled | Monthly closing: disabled`)));
