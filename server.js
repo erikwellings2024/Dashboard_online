@@ -65,6 +65,18 @@ const DEFAULT_CATEGORY_MAP = {
   '0': 'OTHER'
 };
 
+const DEFAULT_CATEGORY_SORT = {
+  'PHARMA': 1,
+  'OTC MEDICINE': 2,
+  'VITAMIN - HEALTH SUPPLEMENTS': 3,
+  'HEALTH FOOD & NUTRITION': 4,
+  'HEALTH SCREENING TEST': 5,
+  'HEALTH SUPPORT & REHAB': 6,
+  'PERSONAL CARE': 7,
+  'GENERAL MERCHANDISE': 8,
+  'OTHER': 9
+};
+
 const DEFAULT_CONFIG = {
   channels: [
     { name: 'HALODOC', rawName: 'HALODOC', active: true, telemed: true, sort: 1 },
@@ -104,6 +116,7 @@ const DEFAULT_CONFIG = {
   ],
   categoryMap: { ...DEFAULT_CATEGORY_MAP },
   categoryTargets: {},
+  categorySort: { ...DEFAULT_CATEGORY_SORT },
   targets: {
     '2026-09': {
       'HALODOC': 651066376,
@@ -436,6 +449,12 @@ async function bootstrap() {
     config.categoryTargets={};
     categoryConfigChanged=true;
   }
+  if(!config.categorySort || typeof config.categorySort!=='object'){
+    config.categorySort={...DEFAULT_CATEGORY_SORT};
+    categoryConfigChanged=true;
+  }else{
+    config.categorySort={...DEFAULT_CATEGORY_SORT,...config.categorySort};
+  }
 
   // Backward-compatible Store Stat migration.
   // Existing masters created before v21 are treated as Existing Store.
@@ -624,7 +643,12 @@ function knownRawCategories() {
 }
 
 function mappedCategoryList() {
-  return [...new Set(knownRawCategories().map(mapCategory).filter(Boolean))].sort();
+  return [...new Set(knownRawCategories().map(mapCategory).filter(Boolean))]
+    .sort((a,b)=>{
+      const sa=Number(config.categorySort?.[a] ?? 9999);
+      const sb=Number(config.categorySort?.[b] ?? 9999);
+      return sa-sb || a.localeCompare(b);
+    });
 }
 
 function activeChannels() {
@@ -1195,7 +1219,6 @@ function targetQuery(sourceRows, period, filters, daysTotalBestEstimate) {
 
 
 function targetCategoryQuery(sourceRows, period, filters, daysTotalBestEstimate) {
-  const base=filterBase(sourceRows,filters).filter(r=>rowInPeriod(r,period));
   const key=monthKey(period.end);
   const targetMap=config.categoryTargets?.[key]||{};
   const elapsedDays=daysInclusive(period.start,period.end);
@@ -1207,28 +1230,106 @@ function targetCategoryQuery(sourceRows, period, filters, daysTotalBestEstimate)
 
   const factor=elapsedDays/calendarDays;
   const bestEstFactor=elapsedDays>0?bestEstDays/elapsedDays:0;
-  const categories=mappedCategoryList();
 
-  const rows=categories.map(category=>{
-    const actual=metrics(base.filter(r=>effectiveCategory(r)===category));
+  // TOTAL SALES ignores only the Category filter.
+  // Date, Channel, Store, Sales Type, Customer Type and Store Stat still apply.
+  const totalFilters={...(filters||{})};
+  delete totalFilters.categories;
+
+  const baseAll=filterBase(sourceRows,totalFilters).filter(r=>rowInPeriod(r,period));
+  const baseSelected=filterBase(sourceRows,filters||{}).filter(r=>rowInPeriod(r,period));
+
+  const allCategories=mappedCategoryList();
+  const selectedFilter=arr(filters?.categories).map(x=>String(x).toUpperCase());
+  const selectedCategories=selectedFilter.length
+    ? allCategories.filter(c=>selectedFilter.includes(String(c).toUpperCase()))
+    : allCategories;
+
+  const onlineChannels=new Set(
+    activeChannels()
+      .filter(c=>c.telemed)
+      .map(c=>c.name)
+  );
+
+  function onlineOffline(rows){
+    let onlineSales=0,offlineSales=0;
+    for(const r of rows){
+      if(onlineChannels.has(r.channel)) onlineSales+=safeNum(r.sales);
+      else offlineSales+=safeNum(r.sales);
+    }
+    return {onlineSales,offlineSales};
+  }
+
+  const rows=selectedCategories.map(category=>{
+    const rr=baseSelected.filter(r=>effectiveCategory(r)===category);
+    const actual=metrics(rr);
     const target=safeNum(targetMap[category]);
     const mtdTarget=target*factor;
     const bestEst=actual.sales*bestEstFactor;
+    const split=onlineOffline(rr);
     return {
       category,
+      sort:Number(config.categorySort?.[category] ?? 9999),
       actual,
       target,
       mtdTarget,
       achieve:pct(actual.sales,target),
       achieveMtd:pct(actual.sales,mtdTarget),
-      bestEst
+      offlineSales:split.offlineSales,
+      onlineSales:split.onlineSales,
+      bestEst,
+      contribution:null
     };
   });
 
-  const totalActual=metrics(base);
-  const totalTarget=rows.reduce((a,x)=>a+x.target,0);
-  const totalMtdTarget=rows.reduce((a,x)=>a+x.mtdTarget,0);
-  const totalBestEst=rows.reduce((a,x)=>a+x.bestEst,0);
+  const totalSalesActual=metrics(baseAll);
+  const totalSalesSplit=onlineOffline(baseAll);
+  const totalSalesTarget=allCategories.reduce((a,c)=>a+safeNum(targetMap[c]),0);
+  const totalSalesMtdTarget=totalSalesTarget*factor;
+  const totalSalesBestEst=totalSalesActual.sales*bestEstFactor;
+
+  for(const r of rows){
+    r.contribution=pct(r.actual.sales,totalSalesActual.sales);
+  }
+
+  const categoryActual=metrics(baseSelected);
+  const categorySplit=onlineOffline(baseSelected);
+  const categoryTarget=selectedCategories.reduce((a,c)=>a+safeNum(targetMap[c]),0);
+  const categoryMtdTarget=categoryTarget*factor;
+  const categoryBestEst=categoryActual.sales*bestEstFactor;
+
+  const totalSales={
+    actual:totalSalesActual.sales,
+    target:totalSalesTarget,
+    mtdTarget:totalSalesMtdTarget,
+    achieve:pct(totalSalesActual.sales,totalSalesTarget),
+    achieveMtd:pct(totalSalesActual.sales,totalSalesMtdTarget),
+    offlineSales:totalSalesSplit.offlineSales,
+    onlineSales:totalSalesSplit.onlineSales,
+    bestEst:totalSalesBestEst,
+    contribution:totalSalesActual.sales?1:null
+  };
+
+  const totalCategory={
+    actual:categoryActual.sales,
+    target:categoryTarget,
+    mtdTarget:categoryMtdTarget,
+    achieve:pct(categoryActual.sales,categoryTarget),
+    achieveMtd:pct(categoryActual.sales,categoryMtdTarget),
+    offlineSales:categorySplit.offlineSales,
+    onlineSales:categorySplit.onlineSales,
+    bestEst:categoryBestEst,
+    contribution:pct(categoryActual.sales,totalSalesActual.sales),
+    varianceTarget:categoryActual.sales-categoryTarget,
+    varianceMtd:categoryActual.sales-categoryMtdTarget
+  };
+
+  const categoryPct={
+    actual:pct(totalCategory.actual,totalSales.actual),
+    target:pct(totalCategory.target,totalSales.target),
+    mtdTarget:pct(totalCategory.mtdTarget,totalSales.mtdTarget),
+    bestEst:pct(totalCategory.bestEst,totalSales.bestEst)
+  };
 
   return {
     month:key,
@@ -1237,16 +1338,9 @@ function targetCategoryQuery(sourceRows, period, filters, daysTotalBestEstimate)
     calendarDays,
     bestEstDays,
     rows,
-    total:{
-      actual:totalActual.sales,
-      target:totalTarget,
-      mtdTarget:totalMtdTarget,
-      achieve:pct(totalActual.sales,totalTarget),
-      achieveMtd:pct(totalActual.sales,totalMtdTarget),
-      bestEst:totalBestEst,
-      varianceTarget:totalActual.sales-totalTarget,
-      varianceMtd:totalActual.sales-totalMtdTarget
-    }
+    totalSales,
+    totalCategory,
+    categoryPct
   };
 }
 
@@ -1450,6 +1544,7 @@ app.get('/api/meta', requireAuth, (req,res)=>{
     storeStats:['Existing Store','New Store'],
     categories:mappedCategoryList(),
     rawCategories:knownRawCategories(),
+    categorySort:config.categorySort||{},
     brands:metaIndex.brands||[],
     salesTypes:metaIndex.salesTypes||[],
     customerTypes:metaIndex.customerTypes||[],
@@ -1668,6 +1763,11 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
     ]).filter(([k,v])=>k&&v)),
     targets:incoming.targets&&typeof incoming.targets==='object'?incoming.targets:{},
     categoryTargets:incoming.categoryTargets&&typeof incoming.categoryTargets==='object'?incoming.categoryTargets:{},
+    categorySort:Object.fromEntries(
+      Object.entries(incoming.categorySort&&typeof incoming.categorySort==='object'?incoming.categorySort:{})
+        .map(([k,v])=>[String(k).trim().toUpperCase(),Number(v)])
+        .filter(([k,v])=>k&&Number.isFinite(v))
+    ),
     rankingDefault:Math.max(1,Math.min(10,Number(incoming.rankingDefault||10)))
   };
   await writeJsonAtomic(CONFIG_FILE,config);
@@ -1749,4 +1849,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Monthly closing: disabled`)));
