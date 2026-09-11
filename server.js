@@ -411,6 +411,181 @@ function writeWithBackpressure(stream, chunk) {
   });
 }
 
+
+async function readExactlyAt(fd,length,position){
+  const buf=Buffer.alloc(length);
+  const {bytesRead}=await fd.read(buf,0,length,position);
+  if(bytesRead!==length) throw new Error('XLSX_ZIP_UNEXPECTED_EOF');
+  return buf;
+}
+
+async function xlsxNeedsZipNormalization(filePath){
+  const fd=await fsp.open(filePath,'r');
+  try{
+    const h=await readExactlyAt(fd,30,0);
+    if(h.readUInt32LE(0)!==0x04034b50) return false;
+    const versionNeeded=h.readUInt16LE(4);
+    const flags=h.readUInt16LE(6);
+    // Some current Metabase exports use ZIP version 4.5 + data descriptors.
+    // ExcelJS streaming/unzipper can misread the 64-bit descriptor and throw
+    // "invalid signature: 0x41d". Standardize only those files.
+    return versionNeeded>=45 && !!(flags & 0x8);
+  }finally{
+    await fd.close();
+  }
+}
+
+async function readZipCentralEntries(filePath){
+  const st=await fsp.stat(filePath);
+  const fd=await fsp.open(filePath,'r');
+  try{
+    const tailLen=Math.min(st.size,22+65535+1024);
+    const tail=await readExactlyAt(fd,tailLen,st.size-tailLen);
+    const eocdSig=Buffer.from([0x50,0x4b,0x05,0x06]);
+    const eocd=tail.lastIndexOf(eocdSig);
+    if(eocd<0) throw new Error('XLSX_ZIP_EOCD_NOT_FOUND');
+
+    const totalEntries=tail.readUInt16LE(eocd+10);
+    const cdSize=tail.readUInt32LE(eocd+12);
+    const cdOffset=tail.readUInt32LE(eocd+16);
+    if(totalEntries===0xffff || cdSize===0xffffffff || cdOffset===0xffffffff){
+      throw new Error('XLSX_ZIP64_CENTRAL_UNSUPPORTED');
+    }
+
+    const cd=await readExactlyAt(fd,cdSize,cdOffset);
+    const entries=[];
+    let cur=0;
+    while(cur<cd.length){
+      if(cd.readUInt32LE(cur)!==0x02014b50) throw new Error('XLSX_ZIP_CENTRAL_INVALID');
+      const nameLen=cd.readUInt16LE(cur+28);
+      const extraLen=cd.readUInt16LE(cur+30);
+      const commentLen=cd.readUInt16LE(cur+32);
+
+      const entry={
+        versionMadeBy:cd.readUInt16LE(cur+4),
+        versionNeeded:cd.readUInt16LE(cur+6),
+        flags:cd.readUInt16LE(cur+8),
+        method:cd.readUInt16LE(cur+10),
+        modTime:cd.readUInt16LE(cur+12),
+        modDate:cd.readUInt16LE(cur+14),
+        crc:cd.readUInt32LE(cur+16),
+        compressedSize:cd.readUInt32LE(cur+20),
+        uncompressedSize:cd.readUInt32LE(cur+24),
+        internalAttr:cd.readUInt16LE(cur+36),
+        externalAttr:cd.readUInt32LE(cur+38),
+        localOffset:cd.readUInt32LE(cur+42),
+        name:Buffer.from(cd.subarray(cur+46,cur+46+nameLen)),
+        comment:Buffer.from(cd.subarray(cur+46+nameLen+extraLen,cur+46+nameLen+extraLen+commentLen))
+      };
+      entries.push(entry);
+      cur+=46+nameLen+extraLen+commentLen;
+    }
+
+    if(entries.length!==totalEntries) throw new Error('XLSX_ZIP_ENTRY_COUNT_MISMATCH');
+    return entries;
+  }finally{
+    await fd.close();
+  }
+}
+
+async function normalizeXlsxZipDescriptors(filePath){
+  const entries=await readZipCentralEntries(filePath);
+  const src=await fsp.open(filePath,'r');
+  const outPath=`${filePath}.${process.pid}.${Date.now()}.standard.xlsx`;
+  const out=fs.createWriteStream(outPath);
+  let offset=0;
+  const rewritten=[];
+
+  try{
+    for(const e of entries){
+      const local=await readExactlyAt(src,30,e.localOffset);
+      if(local.readUInt32LE(0)!==0x04034b50) throw new Error('XLSX_ZIP_LOCAL_INVALID');
+      const localNameLen=local.readUInt16LE(26);
+      const localExtraLen=local.readUInt16LE(28);
+      const dataStart=e.localOffset+30+localNameLen+localExtraLen;
+
+      const newOffset=offset;
+      const h=Buffer.alloc(30);
+      h.writeUInt32LE(0x04034b50,0);
+      h.writeUInt16LE(20,4);
+      h.writeUInt16LE(e.flags & ~0x8,6); // no data descriptor
+      h.writeUInt16LE(e.method,8);
+      h.writeUInt16LE(e.modTime,10);
+      h.writeUInt16LE(e.modDate,12);
+      h.writeUInt32LE(e.crc>>>0,14);
+      h.writeUInt32LE(e.compressedSize>>>0,18);
+      h.writeUInt32LE(e.uncompressedSize>>>0,22);
+      h.writeUInt16LE(e.name.length,26);
+      h.writeUInt16LE(0,28);
+
+      await writeWithBackpressure(out,h);
+      await writeWithBackpressure(out,e.name);
+      offset+=h.length+e.name.length;
+
+      if(e.compressedSize){
+        const rs=fs.createReadStream(filePath,{start:dataStart,end:dataStart+e.compressedSize-1});
+        for await(const chunk of rs){
+          await writeWithBackpressure(out,chunk);
+          offset+=chunk.length;
+        }
+      }
+
+      rewritten.push({...e,newOffset});
+    }
+
+    const cdOffset=offset;
+    for(const e of rewritten){
+      const h=Buffer.alloc(46);
+      h.writeUInt32LE(0x02014b50,0);
+      h.writeUInt16LE(e.versionMadeBy,4);
+      h.writeUInt16LE(20,6);
+      h.writeUInt16LE(e.flags & ~0x8,8);
+      h.writeUInt16LE(e.method,10);
+      h.writeUInt16LE(e.modTime,12);
+      h.writeUInt16LE(e.modDate,14);
+      h.writeUInt32LE(e.crc>>>0,16);
+      h.writeUInt32LE(e.compressedSize>>>0,20);
+      h.writeUInt32LE(e.uncompressedSize>>>0,24);
+      h.writeUInt16LE(e.name.length,28);
+      h.writeUInt16LE(0,30);
+      h.writeUInt16LE(e.comment.length,32);
+      h.writeUInt16LE(0,34);
+      h.writeUInt16LE(e.internalAttr,36);
+      h.writeUInt32LE(e.externalAttr>>>0,38);
+      h.writeUInt32LE(e.newOffset>>>0,42);
+
+      await writeWithBackpressure(out,h);
+      await writeWithBackpressure(out,e.name);
+      if(e.comment.length) await writeWithBackpressure(out,e.comment);
+      offset+=h.length+e.name.length+e.comment.length;
+    }
+
+    const cdSize=offset-cdOffset;
+    const eocd=Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50,0);
+    eocd.writeUInt16LE(0,4);
+    eocd.writeUInt16LE(0,6);
+    eocd.writeUInt16LE(rewritten.length,8);
+    eocd.writeUInt16LE(rewritten.length,10);
+    eocd.writeUInt32LE(cdSize>>>0,12);
+    eocd.writeUInt32LE(cdOffset>>>0,16);
+    eocd.writeUInt16LE(0,20);
+    await writeWithBackpressure(out,eocd);
+
+    await new Promise((resolve,reject)=>{
+      out.once('error',reject);
+      out.end(resolve);
+    });
+    return outPath;
+  }catch(e){
+    try{out.destroy()}catch{}
+    await fsp.unlink(outPath).catch(()=>{});
+    throw e;
+  }finally{
+    await src.close();
+  }
+}
+
 async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
   // Determine RAW/first sheet without expanding worksheet XML into JS objects.
   const metaWb = XLSX.readFile(filePath,{bookSheets:true});
@@ -884,7 +1059,22 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
     // Stream the XLSX row-by-row. This avoids loading the full workbook and a second
     // normalized copy into memory, which caused Railway SIGKILL on larger months.
     const replacedRows=Number(monthIndex[targetMonth]?.rowCount||0);
-    const streamed=await streamReplaceMonthFromXlsx(req.file.path,targetMonth);
+
+    let parserFile=req.file.path;
+    let normalizedZipFile=null;
+    if(await xlsxNeedsZipNormalization(req.file.path)){
+      normalizedZipFile=await normalizeXlsxZipDescriptors(req.file.path);
+      parserFile=normalizedZipFile;
+      console.log(`[UPLOAD] standardized XLSX ZIP descriptors for ${req.file.originalname}`);
+    }
+
+    let streamed;
+    try{
+      streamed=await streamReplaceMonthFromXlsx(parserFile,targetMonth);
+    }finally{
+      if(normalizedZipFile) await fsp.unlink(normalizedZipFile).catch(()=>{});
+    }
+
     console.log(`[UPLOAD] user=${req.user.username} target=${targetMonth} file=${req.file.originalname} rawRows=${streamed.rawRows} validRows=${streamed.validRows} channels=${JSON.stringify(streamed.channelSummary)}`);
 
     const incomingCoverage={minDate:streamed.minDate,maxDate:streamed.maxDate};
@@ -1037,4 +1227,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Monthly closing: disabled`)));
