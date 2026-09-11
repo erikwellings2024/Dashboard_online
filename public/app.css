@@ -276,12 +276,13 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
    Period | Channel | Store | Brand | Sales Type | Apply */
 #targetFilters .filter-grid{
   grid-template-columns:
-    minmax(200px,1.45fr)
-    minmax(135px,1fr)
-    minmax(135px,1fr)
-    minmax(135px,1fr)
-    minmax(130px,.95fr)
-    minmax(110px,.75fr);
+    minmax(190px,1.35fr)
+    minmax(120px,.90fr)
+    minmax(120px,.90fr)
+    minmax(120px,.90fr)
+    minmax(115px,.85fr)
+    minmax(145px,1.00fr)
+    minmax(105px,.72fr);
 }
 
 /* SECTION 3 — Store Performance
@@ -401,5 +402,95 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
   #itemFilters .filter-grid{
     min-width:980px;
     grid-template-columns:repeat(6,minmax(145px,1fr));
+  }
+}
+
+
+/* v18 — Section 2: manual Days Total Best Estimate */
+#targetFilters .best-est-days-field .control{
+  display:block;
+  text-align:right;
+  cursor:text;
+  font-weight:700;
+}
+#targetFilters .best-est-days-field input[type=number]{
+  appearance:textfield;
+  -moz-appearance:textfield;
+}
+#targetFilters .best-est-days-field input::-webkit-inner-spin-button,
+#targetFilters .best-est-days-field input::-webkit-outer-spin-button{
+  opacity:.65;
+}
+@media (max-width:1600px){
+  #targetFilters .filter-grid{
+    grid-template-columns:repeat(4,minmax(150px,1fr));
+  }
+}
+@media (max-width:1000px){
+  #targetFilters .filter-grid{
+    min-width:980px;
+    grid-template-columns:repeat(4,minmax(185px,1fr));
+  }
+}
+
+
+/* v19 — filter layout adjustments */
+/* Section 1 now includes Brand + Item. Keep desktop in one row. */
+#channelFilters .filter-grid{
+  grid-template-columns:
+    minmax(170px,1.25fr)
+    minmax(170px,1.25fr)
+    minmax(170px,1.25fr)
+    minmax(105px,.72fr)
+    minmax(105px,.72fr)
+    minmax(105px,.72fr)
+    minmax(105px,.72fr)
+    minmax(215px,1.50fr)
+    minmax(100px,.68fr);
+}
+
+/* Section 2 is intentionally simplified:
+   Actual Period | Store | Sales Type | BE Days | Apply */
+#targetFilters .filter-grid{
+  grid-template-columns:
+    minmax(220px,1.45fr)
+    minmax(150px,1fr)
+    minmax(145px,.95fr)
+    minmax(165px,1.05fr)
+    minmax(115px,.72fr);
+}
+
+/* Active filter chips */
+.chips .chip{
+  max-width:520px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.chips .chip b{font-weight:700}
+
+/* Item is wide enough in Channel Performance. */
+#channelFilters .product-picker{min-width:0}
+#channelFilters .product-suggest{width:min(560px,70vw)}
+
+/* Preserve max-two-row behavior on smaller widths. */
+@media (max-width:1600px){
+  #channelFilters .filter-grid{
+    grid-template-columns:repeat(5,minmax(150px,1fr));
+  }
+  #channelFilters .product-picker{grid-column:span 2}
+
+  #targetFilters .filter-grid{
+    grid-template-columns:repeat(5,minmax(145px,1fr));
+  }
+}
+@media (max-width:1000px){
+  #channelFilters .filter-grid{
+    min-width:1100px;
+    grid-template-columns:repeat(5,minmax(180px,1fr));
+  }
+  #targetFilters .filter-grid{
+    min-width:900px;
+    grid-template-columns:repeat(5,minmax(155px,1fr));
   }
 }
