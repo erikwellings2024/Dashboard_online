@@ -504,3 +504,68 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 }
 #targetTimeFactor b{color:#244b69}
 .chip-note{color:#697786;font-weight:400}
+
+
+/* v21 — Customer Type + Store Stat filters */
+#channelFilters .filter-grid{
+  grid-template-columns:
+    minmax(165px,1.22fr)
+    minmax(165px,1.22fr)
+    minmax(165px,1.22fr)
+    minmax(100px,.72fr)
+    minmax(100px,.72fr)
+    minmax(100px,.72fr)
+    minmax(100px,.72fr)
+    minmax(115px,.80fr)
+    minmax(115px,.80fr)
+    minmax(205px,1.45fr)
+    minmax(95px,.65fr);
+}
+#targetFilters .filter-grid{
+  grid-template-columns:
+    minmax(210px,1.40fr)
+    minmax(135px,.90fr)
+    minmax(130px,.88fr)
+    minmax(140px,.95fr)
+    minmax(125px,.85fr)
+    minmax(155px,1fr)
+    minmax(105px,.70fr);
+}
+#storeFilters .filter-grid,
+#itemFilters .filter-grid{
+  grid-template-columns:repeat(13,minmax(95px,1fr));
+}
+#storeFilters .product-picker,
+#itemFilters .product-picker{grid-column:span 2}
+
+#brandFilters .filter-grid{
+  grid-template-columns:
+    minmax(165px,1.2fr)
+    minmax(165px,1.2fr)
+    minmax(165px,1.2fr)
+    repeat(6,minmax(100px,.75fr))
+    minmax(70px,.5fr)
+    minmax(95px,.65fr);
+}
+
+/* Store Stat column is intentionally compact. */
+#storeTable table th:first-child,
+#storeTable table td:first-child{
+  width:78px;
+  min-width:78px;
+  text-align:center;
+}
+
+@media(max-width:1600px){
+  #channelFilters .filter-grid,
+  #brandFilters .filter-grid{
+    grid-template-columns:repeat(6,minmax(145px,1fr));
+  }
+  #storeFilters .filter-grid,
+  #itemFilters .filter-grid{
+    grid-template-columns:repeat(7,minmax(135px,1fr));
+  }
+  #targetFilters .filter-grid{
+    grid-template-columns:repeat(4,minmax(150px,1fr));
+  }
+}
