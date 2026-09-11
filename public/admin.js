@@ -23,7 +23,66 @@ async function saveConfig(){const d=await api('/api/admin/config',{method:'PUT',
 
 function renderTarget(){const month=$('#targetConfigMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
 $('#loadTarget').onclick=renderTarget;
-$('#saveTarget').onclick=async()=>{try{const month=$('#targetConfigMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
+$('#saveTarget').onclick=async()=>{try{const month=$('#targetConfigMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target Online saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
+
+
+function mappedCategoriesAdmin(){
+  const raw=[...new Set([
+    ...(META?.rawCategories||[]),
+    ...Object.keys(CFG.categoryMap||{})
+  ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))];
+  return [...new Set(raw.map(x=>String(CFG.categoryMap?.[x]||x).trim().toUpperCase()).filter(Boolean))].sort();
+}
+
+function renderCategoryTarget(){
+  const month=$('#categoryTargetConfigMonth').value;
+  const t=CFG.categoryTargets?.[month]||{};
+  $('#categoryTargetTable tbody').innerHTML=mappedCategoriesAdmin().map(c=>`<tr><td>${esc(c)}</td><td><input class="category-target-value" data-category="${esc(c)}" type="number" value="${Number(t[c]||0)}"></td></tr>`).join('');
+}
+$('#loadCategoryTarget').onclick=renderCategoryTarget;
+$('#saveCategoryTarget').onclick=async()=>{
+  try{
+    const month=$('#categoryTargetConfigMonth').value;
+    if(!month)throw new Error('Choose target month');
+    CFG.categoryTargets=CFG.categoryTargets||{};
+    CFG.categoryTargets[month]={};
+    $$('.category-target-value').forEach(x=>CFG.categoryTargets[month][x.dataset.category]=Number(x.value||0));
+    await saveConfig();
+    msg('#categoryTargetMsg','Target Category saved for '+month);
+  }catch(e){msg('#categoryTargetMsg',e.message,false)}
+};
+
+function categoryMapRow(raw='',mapped=''){
+  return `<tr><td><input class="cat-raw" value="${esc(raw)}"></td><td><input class="cat-map" value="${esc(mapped||raw)}"></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`;
+}
+function renderCategoryMap(){
+  const raw=[...new Set([
+    ...(META?.rawCategories||[]),
+    ...Object.keys(CFG.categoryMap||{})
+  ].map(x=>String(x).trim().toUpperCase()).filter(Boolean))].sort();
+  $('#categoryMapTable tbody').innerHTML=raw.map(r=>categoryMapRow(r,CFG.categoryMap?.[r]||r)).join('');
+  bindRemove();
+}
+function collectCategoryMap(){
+  const out={};
+  $$('#categoryMapTable tbody tr').forEach(r=>{
+    const raw=$('.cat-raw',r).value.trim().toUpperCase();
+    const mapped=$('.cat-map',r).value.trim().toUpperCase();
+    if(raw&&mapped)out[raw]=mapped;
+  });
+  return out;
+}
+$('#addCategoryMap').onclick=()=>{$('#categoryMapTable tbody').insertAdjacentHTML('beforeend',categoryMapRow());bindRemove()};
+$('#saveCategoryMap').onclick=async()=>{
+  try{
+    CFG.categoryMap=collectCategoryMap();
+    await saveConfig();
+    META=await api('/api/meta');
+    renderCategoryMap();
+    renderCategoryTarget();
+    msg('#categoryMapMsg','Mapping Category saved. Semua filter Category mengikuti mapping terbaru.');
+  }catch(e){msg('#categoryMapMsg',e.message,false)}
+};
 
 async function loadUsers(){USERS=await api('/api/admin/users');renderUsers()}
 function renderUsers(){$('#userTable tbody').innerHTML=USERS.map(u=>`<tr data-id="${u.id}"><td>${esc(u.username)}</td><td><input class="u-name" value="${esc(u.displayName||u.username)}"></td><td><select class="u-role"><option value="guest" ${u.role==='guest'?'selected':''}>Guest</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td><td class="center"><input class="u-active" type="checkbox" ${u.active?'checked':''}></td><td><input class="u-pass" type="password" placeholder="Leave blank"></td><td class="action-cell"><button class="btn save-user">Save</button> <button class="btn red delete-user">Delete</button></td></tr>`).join('');$$('.save-user').forEach(b=>b.onclick=()=>saveUser(b.closest('tr')));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.closest('tr')))}
@@ -160,11 +219,18 @@ async function boot(){
   const currentMonth=META?.uploadPolicy?.currentMonth || new Date().toISOString().slice(0,7);
   const targetEl=$('#targetConfigMonth');
   if(targetEl) targetEl.value=currentMonth;
+  const categoryTargetEl=$('#categoryTargetConfigMonth');
+  if(categoryTargetEl) categoryTargetEl.value=currentMonth;
+
+  CFG.categoryTargets=CFG.categoryTargets||{};
+  CFG.categoryMap=CFG.categoryMap||{};
 
   renderChannels();
   renderStores();
   initMonthSelect();
   renderTarget();
+  renderCategoryTarget();
+  renderCategoryMap();
   renderRuntime();
   renderUploadPolicy();
   renderMonthStorage();

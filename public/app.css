@@ -569,3 +569,31 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
     grid-template-columns:repeat(4,minmax(150px,1fr));
   }
 }
+
+
+/* v23 — Category Target + metric selector */
+.title-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.title-line h2{margin:0}
+.metric-select{
+  height:27px;min-width:132px;padding:2px 24px 2px 8px;
+  border:1px solid #aebac4;background:#fff;color:#263746;
+  font:700 10px Arial,Helvetica,sans-serif
+}
+#categoryTargetFilters .filter-grid{
+  grid-template-columns:
+    minmax(210px,1.4fr)
+    minmax(135px,.9fr)
+    minmax(130px,.88fr)
+    minmax(140px,.95fr)
+    minmax(125px,.85fr)
+    minmax(155px,1fr)
+    minmax(105px,.70fr)
+}
+@media(max-width:1600px){
+  #categoryTargetFilters .filter-grid{grid-template-columns:repeat(4,minmax(150px,1fr))}
+}
+@media(max-width:1000px){
+  #categoryTargetFilters .filter-grid{min-width:980px;grid-template-columns:repeat(4,minmax(185px,1fr))}
+}
+#categoryMapTable td:first-child,#categoryMapTable th:first-child{width:45%}
+#categoryMapTable td:nth-child(2),#categoryMapTable th:nth-child(2){width:45%}
