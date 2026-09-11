@@ -815,17 +815,30 @@ function channelQuery(periods, filters) {
   return { rows, total, telemed, telemedPct, variance };
 }
 
-function targetQuery(period, filters) {
+function targetQuery(period, filters, daysTotalBestEstimate) {
   const base = filterBase(filters).filter(r => rowInPeriod(r,period));
   const key = monthKey(period.end);
   const targetMap = config.targets[key] || {};
-  const factor = daysInclusive(period.start, period.end) / daysInMonth(period.end);
+  const elapsedDays = daysInclusive(period.start, period.end);
+  const calendarDays = daysInMonth(period.end);
+
+  let bestEstDays = Number(daysTotalBestEstimate);
+  if (!Number.isFinite(bestEstDays) || bestEstDays <= 0) bestEstDays = calendarDays;
+  bestEstDays = Math.max(0.5, Math.min(31.5, bestEstDays));
+
+  // Time Factor (MTD) stays based on normal calendar days.
+  const factor = elapsedDays / calendarDays;
+
+  // BEST EST uses the effective total days entered by the user.
+  // Example Sep 1-10, BE Days 20 => Actual / 10 * 20.
+  const bestEstFactor = elapsedDays > 0 ? bestEstDays / elapsedDays : 0;
+
   const channels = activeChannels();
   const rows = channels.map(c => {
     const actual = metrics(base.filter(r => r.channel === c.name));
     const target = safeNum(targetMap[c.name]);
     const mtdTarget = target * factor;
-    const bestEst = factor > 0 ? actual.sales / factor : 0;
+    const bestEst = actual.sales * bestEstFactor;
     return {
       channel: c.name,
       actual,
@@ -847,7 +860,7 @@ function targetQuery(period, filters) {
   const teleMtdTarget = teleRows.reduce((a,x)=>a+x.mtdTarget,0);
   const teleBestEst = teleRows.reduce((a,x)=>a+x.bestEst,0);
   return {
-    month: key, factor, rows,
+    month: key, factor, elapsedDays, calendarDays, bestEstDays, bestEstFactor, rows,
     total: { actual: totalActual.sales, target: totalTarget, mtdTarget: totalMtdTarget, achieve: pct(totalActual.sales,totalTarget), achieveMtd: pct(totalActual.sales,totalMtdTarget), bestEst: totalBestEst },
     telemed: { actual: teleActual, target: teleTarget, mtdTarget: teleMtdTarget, bestEst: teleBestEst, pctActual: pct(teleActual,totalActual.sales), pctTarget: pct(teleTarget,totalTarget), pctBestEst: pct(teleBestEst,totalBestEst), varianceTarget: teleActual-teleTarget, varianceMtd: teleActual-teleMtdTarget, achieveTarget: pct(teleActual,teleTarget), achieveMtd: pct(teleActual,teleMtdTarget) }
   };
@@ -1021,7 +1034,10 @@ app.post('/api/query/channel', requireAuth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 app.post('/api/query/target', requireAuth, (req,res)=>{
-  try { const period=normalizePeriods([req.body.period])[0]; res.json(targetQuery(period,req.body.filters||{})); }
+  try {
+    const period=normalizePeriods([req.body.period])[0];
+    res.json(targetQuery(period,req.body.filters||{},req.body.daysTotalBestEstimate));
+  }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 app.post('/api/query/store', requireAuth, (req,res)=>{
@@ -1227,4 +1243,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Monthly closing: disabled`)));
