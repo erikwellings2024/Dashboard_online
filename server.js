@@ -11,6 +11,11 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
+const zlib = require('zlib');
+const { pipeline } = require('stream/promises');
+const { Readable } = require('stream');
+const { promisify } = require('util');
+const gunzipAsync = promisify(zlib.gunzip);
 
 const app = express();
 // Railway runs the app behind a reverse proxy.
@@ -22,7 +27,8 @@ const DATA_DIR = path.join(ROOT, 'data');
 const UPLOAD_DIR = path.join(ROOT, 'uploads');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
-const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined cache; monthly files are canonical
+const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined cache
+const RAW_CACHE_GZ_FILE = path.join(DATA_DIR, 'raw-cache.json.gz');
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
 const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
 const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
@@ -131,9 +137,102 @@ async function writeJsonAtomic(file, value) {
 }
 
 
-function monthPath(key) {
+function monthJsonPath(key) {
   const [year, month] = String(key).split('-');
   return path.join(MONTHLY_DIR, year, `${month}.json`);
+}
+
+function monthPath(key) {
+  const [year, month] = String(key).split('-');
+  return path.join(MONTHLY_DIR, year, `${month}.json.gz`);
+}
+
+async function fileExists(file) {
+  try { await fsp.access(file); return true; }
+  catch { return false; }
+}
+
+async function readMonthRows(key) {
+  const gz=monthPath(key);
+  const json=monthJsonPath(key);
+
+  if (await fileExists(gz)) {
+    try {
+      const compressed=await fsp.readFile(gz);
+      const raw=await gunzipAsync(compressed);
+      const rows=JSON.parse(raw.toString('utf8'));
+      return Array.isArray(rows)?rows:[];
+    } catch(e) {
+      console.error(`[STORAGE] Failed reading ${gz}:`,e.message);
+      // Fallback to legacy JSON if it still exists.
+    }
+  }
+
+  return readJson(json,[]);
+}
+
+async function gzipFileAtomic(source,dest) {
+  const tmp=`${dest}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.mkdir(path.dirname(dest),{recursive:true});
+  try {
+    await pipeline(
+      fs.createReadStream(source),
+      zlib.createGzip({level:6}),
+      fs.createWriteStream(tmp)
+    );
+    await fsp.rename(tmp,dest);
+  } catch(e) {
+    await fsp.unlink(tmp).catch(()=>{});
+    throw e;
+  }
+}
+
+async function migrateMonthlyStorageToGzip() {
+  let converted=0,removedDuplicates=0;
+  for(const key of storageMonthKeys()){
+    const legacy=monthJsonPath(key);
+    const gz=monthPath(key);
+    if(!(await fileExists(legacy))) continue;
+
+    if(await fileExists(gz)){
+      // Compressed canonical copy already exists.
+      await fsp.unlink(legacy).catch(()=>{});
+      removedDuplicates++;
+      continue;
+    }
+
+    const before=(await fsp.stat(legacy)).size;
+    await gzipFileAtomic(legacy,gz);
+    const after=(await fsp.stat(gz)).size;
+    await fsp.unlink(legacy);
+    converted++;
+    console.log(`[STORAGE] compressed ${key}: ${(before/1048576).toFixed(1)} MB -> ${(after/1048576).toFixed(1)} MB`);
+  }
+  if(converted||removedDuplicates)console.log(`[STORAGE] monthly compression complete: converted=${converted}, duplicate JSON removed=${removedDuplicates}`);
+}
+
+async function readLegacyCache() {
+  if(await fileExists(RAW_CACHE_GZ_FILE)){
+    try{
+      const raw=await gunzipAsync(await fsp.readFile(RAW_CACHE_GZ_FILE));
+      const rows=JSON.parse(raw.toString('utf8'));
+      return Array.isArray(rows)?rows:[];
+    }catch(e){console.error('[STORAGE] legacy gzip read failed:',e.message)}
+  }
+  return readJson(RAW_CACHE_FILE,[]);
+}
+
+async function compressLegacyRawCache() {
+  if(!(await fileExists(RAW_CACHE_FILE))) return;
+  if(await fileExists(RAW_CACHE_GZ_FILE)){
+    await fsp.unlink(RAW_CACHE_FILE).catch(()=>{});
+    return;
+  }
+  const before=(await fsp.stat(RAW_CACHE_FILE)).size;
+  await gzipFileAtomic(RAW_CACHE_FILE,RAW_CACHE_GZ_FILE);
+  const after=(await fsp.stat(RAW_CACHE_GZ_FILE)).size;
+  await fsp.unlink(RAW_CACHE_FILE);
+  console.log(`[STORAGE] compressed legacy raw-cache: ${(before/1048576).toFixed(1)} MB -> ${(after/1048576).toFixed(1)} MB`);
 }
 
 function monthMetaPathKey(key) { return String(key); }
@@ -163,7 +262,7 @@ async function ensureMonthlyFolders() {
 async function readAllMonthlyRows() {
   const all=[];
   for (const key of storageMonthKeys()) {
-    const rows=await readJson(monthPath(key), []);
+    const rows=await readMonthRows(key);
     if (Array.isArray(rows) && rows.length) all.push(...rows);
   }
   all.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
@@ -192,7 +291,7 @@ async function readRowsForPeriods(periods) {
 
   const rows=[];
   for(const key of [...keys].sort()){
-    const monthRows=await readJson(monthPath(key),[]);
+    const monthRows=await readMonthRows(key);
     if(!Array.isArray(monthRows) || !monthRows.length) continue;
     for(const row of monthRows){
       // Store / PT / Store Stat / Channel master changes are applied dynamically.
@@ -245,7 +344,7 @@ async function rebuildMetaIndexFromMonthly() {
   let idx=emptyMetaIndex();
   for(const key of storageMonthKeys()){
     if(Number(monthIndex[key]?.rowCount||0)<=0) continue;
-    const rows=await readJson(monthPath(key),[]);
+    const rows=await readMonthRows(key);
     if(Array.isArray(rows) && rows.length) idx=mergeMetaRows(idx,rows);
   }
   metaIndex=idx;
@@ -256,15 +355,27 @@ async function rebuildMetaIndexFromMonthly() {
 async function writeMonthRows(key, rows) {
   if (!monthAllowed(key)) throw new Error(`MONTH_OUT_OF_RANGE:${key}`);
   const file=monthPath(key);
-  await fsp.mkdir(path.dirname(file), {recursive:true});
-  await writeJsonAtomic(file, rows);
+  const tmp=`${file}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.mkdir(path.dirname(file),{recursive:true});
+  try{
+    await pipeline(
+      Readable.from([JSON.stringify(rows)]),
+      zlib.createGzip({level:6}),
+      fs.createWriteStream(tmp)
+    );
+    await fsp.rename(tmp,file);
+    await fsp.unlink(monthJsonPath(key)).catch(()=>{});
+  }catch(e){
+    await fsp.unlink(tmp).catch(()=>{});
+    throw e;
+  }
 }
 
 async function migrateLegacyCacheIfNeeded() {
   const totals=monthIndexTotals();
   if(totals.rowCount>0) return [];
 
-  const legacy=await readJson(RAW_CACHE_FILE, []);
+  const legacy=await readLegacyCache();
   if (!Array.isArray(legacy) || !legacy.length) return [];
 
   const grouped={};
@@ -344,6 +455,11 @@ async function bootstrap() {
   monthIndex = await readJson(MONTH_INDEX_FILE, {});
   if (!monthIndex || typeof monthIndex !== 'object' || Array.isArray(monthIndex)) monthIndex={};
   await migrateLegacyCacheIfNeeded();
+
+  // v24 storage migration is sequential and streaming:
+  // one month is compressed, verified/renamed, then the old JSON is deleted.
+  await migrateMonthlyStorageToGzip();
+  await compressLegacyRawCache();
 
   runtime = await readJson(RUNTIME_FILE, runtime);
   const totals=monthIndexTotals();
@@ -774,7 +890,9 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
   const targetFile=monthPath(targetMonth);
   await fsp.mkdir(path.dirname(targetFile),{recursive:true});
   const tmp=`${targetFile}.${process.pid}.${Date.now()}.upload.tmp`;
-  const out=fs.createWriteStream(tmp,{encoding:'utf8'});
+  const fileOut=fs.createWriteStream(tmp);
+  const out=zlib.createGzip({level:6});
+  out.pipe(fileOut);
 
   let headerMap=null;
   let rawRowsCount=0, validRows=0, written=0;
@@ -882,10 +1000,16 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
 
     await writeWithBackpressure(out,']');
     await new Promise((resolve,reject)=>{
-      out.once('error',reject);
-      out.end(resolve);
+      let settled=false;
+      const fail=e=>{if(!settled){settled=true;reject(e)}};
+      fileOut.once('error',fail);
+      out.once('error',fail);
+      fileOut.once('finish',()=>{if(!settled){settled=true;resolve()}});
+      out.end();
     });
     await fsp.rename(tmp,targetFile);
+    // Remove the pre-v24 uncompressed copy only after compressed file succeeds.
+    await fsp.unlink(monthJsonPath(targetMonth)).catch(()=>{});
 
     return {
       rawRows:rawRowsCount,
@@ -897,6 +1021,7 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
     };
   } catch(e) {
     try { out.destroy(); } catch {}
+    try { fileOut.destroy(); } catch {}
     await fsp.unlink(tmp).catch(()=>{});
     throw e;
   }
@@ -1464,7 +1589,7 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
 
     // v22: do not concatenate historical transaction rows in memory.
     // Coverage and row count come from the monthly index.
-    const freshMonth=await readJson(monthPath(targetMonth),[]);
+    const freshMonth=await readMonthRows(targetMonth);
     if(Array.isArray(freshMonth) && freshMonth.length){
       metaIndex=mergeMetaRows(metaIndex,freshMonth);
       await writeJsonAtomic(META_INDEX_FILE,metaIndex);
@@ -1624,4 +1749,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Monthly closing: disabled`)));
