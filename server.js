@@ -213,6 +213,19 @@ async function bootstrap() {
   config = await readJson(CONFIG_FILE, null);
   if (!config) {
     config = DEFAULT_CONFIG;
+  }
+
+  // Backward-compatible Store Stat migration.
+  // Existing masters created before v21 are treated as Existing Store.
+  let configChanged=false;
+  if (!Array.isArray(config.stores)) config.stores=[];
+  config.stores=config.stores.map(s=>{
+    const storeStatus=String(s.storeStatus||'Existing Store').trim();
+    const normalizedStatus=storeStatus==='New Store'?'New Store':'Existing Store';
+    if (s.storeStatus!==normalizedStatus) configChanged=true;
+    return {...s,storeStatus:normalizedStatus};
+  });
+  if (configChanged || !(await fsp.access(CONFIG_FILE).then(()=>true).catch(()=>false))) {
     await writeJsonAtomic(CONFIG_FILE, config);
   }
 
@@ -324,10 +337,20 @@ function canonicalChannel(rawName) {
 
 function canonicalStore(rawName) {
   const exact = config.stores.find(s => s.active && String(s.rawName).trim().toLowerCase() === String(rawName || '').trim().toLowerCase());
-  if (exact) return { name: exact.name, pt: exact.pt };
+  if (exact) return { name: exact.name, pt: exact.pt, storeStatus: exact.storeStatus==='New Store'?'New Store':'Existing Store' };
   let name = String(rawName || '').replace(/^Apotek Wellings\s+/i, '').replace(/^SLOC Shopee\s+/i, '').trim().toUpperCase();
   const byName = config.stores.find(s => s.active && s.name.toUpperCase() === name);
-  return { name: byName ? byName.name : name, pt: byName ? byName.pt : 'UNMAPPED' };
+  return {
+    name: byName ? byName.name : name,
+    pt: byName ? byName.pt : 'UNMAPPED',
+    storeStatus: byName && byName.storeStatus==='New Store' ? 'New Store' : 'Existing Store'
+  };
+}
+
+function effectiveStoreStatus(r) {
+  const byName=config.stores.find(s=>s.active && String(s.name).toUpperCase()===String(r.store||'').toUpperCase());
+  if (byName) return byName.storeStatus==='New Store'?'New Store':'Existing Store';
+  return r.storeStat==='New Store'?'New Store':'Existing Store';
 }
 
 function mapCategory(raw) {
@@ -369,6 +392,7 @@ function normalizeRow(r) {
     rawChannel,
     store: store.name,
     pt: store.pt,
+    storeStat: store.storeStatus,
     channel: canonicalChannel(rawChannel),
     // Canonical dashboard SKU is new_item_code.
     sku: String(r.new_item_code || r.old_item_code || '').trim(),
@@ -376,6 +400,7 @@ function normalizeRow(r) {
     itemName: String(r.item_name || '').trim(),
     brand: String(r.brand || '').trim() || 'UNBRANDED',
     category: mapCategory(r.category_2),
+    customerType: String(r.customer_type || '').trim() || 'UNSPECIFIED',
     salesType: String(r.trader_check || '').trim() || 'Regular',
     // Excel reference dashboard uses sub_total_inv as the sales measure.
     // Fall back to sub_total only when sub_total_inv is missing/blank.
@@ -604,7 +629,7 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
   const channelSummary={};
   let selectedFound=false;
 
-  const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','trader_check','sub_total'];
+  const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','customer_type','trader_check','sub_total'];
   const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
 
   const reader=new ExcelJS.stream.xlsx.WorkbookReader(filePath,{
@@ -664,6 +689,7 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
           item_name:get('item_name'),
           brand:get('brand'),
           category_2:get('category_2'),
+          customer_type:get('customer_type'),
           trader_check:get('trader_check'),
           sub_total:get('sub_total'),
           sub_total_inv:get('sub_total_inv'),
@@ -737,7 +763,7 @@ function redecorateRow(r) {
   const rawStore = r.rawStore || r.store;
   const rawChannel = r.rawChannel || r.channel;
   const store = canonicalStore(rawStore);
-  return { ...r, rawStore, rawChannel, store: store.name, pt: store.pt, channel: canonicalChannel(rawChannel) };
+  return { ...r, rawStore, rawChannel, store: store.name, pt: store.pt, storeStat: store.storeStatus, channel: canonicalChannel(rawChannel) };
 }
 
 async function redecorateAllRows() {
@@ -756,6 +782,8 @@ function filterBase(filters = {}) {
   const categories = arr(filters.categories).map(x => x.toUpperCase());
   const brands = arr(filters.brands).map(x => x.toUpperCase());
   const salesTypes = arr(filters.salesTypes).map(x => x.toUpperCase());
+  const customerTypes = arr(filters.customerTypes).map(x => x.toUpperCase());
+  const storeStats = arr(filters.storeStats).map(x => x.toUpperCase());
   const channels = arr(filters.channels).map(x => x.toUpperCase());
   const product = String(filters.product || '').trim().toUpperCase();
   return rawRows.filter(r => {
@@ -764,6 +792,8 @@ function filterBase(filters = {}) {
     if (categories.length && !categories.includes(String(r.category).toUpperCase())) return false;
     if (brands.length && !brands.includes(String(r.brand).toUpperCase())) return false;
     if (salesTypes.length && !salesTypes.includes(String(r.salesType).toUpperCase())) return false;
+    if (customerTypes.length && !customerTypes.includes(String(r.customerType || 'UNSPECIFIED').toUpperCase())) return false;
+    if (storeStats.length && !storeStats.includes(effectiveStoreStatus(r).toUpperCase())) return false;
     if (channels.length && !channels.includes(String(r.channel).toUpperCase())) return false;
     if (product && !(`${r.sku} ${r.newItemCode} ${r.itemName}`.toUpperCase().includes(product))) return false;
     return true;
@@ -870,13 +900,19 @@ function storeQuery(periods, filters) {
   const base = filterBase(filters);
   const active = config.stores.filter(s=>s.active);
   const unique = new Map();
-  for (const s of active) if (!unique.has(s.name)) unique.set(s.name, { name:s.name, pt:s.pt });
+  for (const s of active) if (!unique.has(s.name)) unique.set(s.name, {
+    name:s.name,
+    pt:s.pt,
+    storeStat:s.storeStatus==='New Store'?'New Store':'Existing Store'
+  });
   let stores = [...unique.values()];
   const pts = arr(filters.pts).map(x=>x.toUpperCase());
   const names = arr(filters.stores).map(x=>x.toUpperCase());
+  const storeStats = arr(filters.storeStats).map(x=>x.toUpperCase());
   if (pts.length) stores = stores.filter(s=>pts.includes(s.pt.toUpperCase()));
   if (names.length) stores = stores.filter(s=>names.includes(s.name.toUpperCase()));
-  const rows = stores.map(s=>({ store:s.name, pt:s.pt, periods:metricsByPeriod(base.filter(r=>r.store===s.name),periods) }));
+  if (storeStats.length) stores = stores.filter(s=>storeStats.includes(s.storeStat.toUpperCase()));
+  const rows = stores.map(s=>({ store:s.name, pt:s.pt, storeStat:s.storeStat, periods:metricsByPeriod(base.filter(r=>r.store===s.name),periods) }));
   const total = metricsByPeriod(base.filter(r=>stores.some(s=>s.name===r.store)),periods);
   const variance = periods.map((_,i)=> i===periods.length-1 ? null : ({
     sales: total[i].sales-total[i+1].sales,
@@ -1009,9 +1045,30 @@ app.get('/api/meta', requireAuth, (req,res)=>{
   const brands=[...new Set(rawRows.map(r=>r.brand).filter(Boolean))].sort();
   const categories=[...new Set(rawRows.map(r=>r.category).filter(Boolean))].sort();
   const salesTypes=[...new Set(rawRows.map(r=>r.salesType).filter(Boolean))].sort();
-  const stores=[...new Map(config.stores.filter(s=>s.active).map(s=>[s.name,{name:s.name,pt:s.pt}])).values()].sort((a,b)=>a.name.localeCompare(b.name));
+  const customerTypes=[...new Set(rawRows.map(r=>r.customerType).filter(v=>v&&v!=='UNSPECIFIED'))].sort();
+  const stores=[...new Map(config.stores.filter(s=>s.active).map(s=>[s.name,{
+    name:s.name,
+    pt:s.pt,
+    storeStat:s.storeStatus==='New Store'?'New Store':'Existing Store'
+  }])).values()].sort((a,b)=>a.name.localeCompare(b.name));
   const dates=rawRows.map(r=>r.date).filter(Boolean).sort();
-  res.json({ channels:activeChannels().map(c=>c.name), stores, pts:['EFM','EFIT','ESB'], categories, brands, salesTypes, rankingDefault:config.rankingDefault, runtime, uploadPolicy:uploadPolicy(), storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH}, monthSlots:monthSlots(), minDate:dates[0]||null, maxDate:dates[dates.length-1]||null });
+  res.json({
+    channels:activeChannels().map(c=>c.name),
+    stores,
+    pts:['EFM','EFIT','ESB'],
+    storeStats:['Existing Store','New Store'],
+    categories,
+    brands,
+    salesTypes,
+    customerTypes,
+    rankingDefault:config.rankingDefault,
+    runtime,
+    uploadPolicy:uploadPolicy(),
+    storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH},
+    monthSlots:monthSlots(),
+    minDate:dates[0]||null,
+    maxDate:dates[dates.length-1]||null
+  });
 });
 
 app.get('/api/meta/products', requireAuth, (req,res)=>{
@@ -1157,10 +1214,30 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
   const incoming=req.body||{};
   if (!Array.isArray(incoming.channels) || !Array.isArray(incoming.stores)) return res.status(400).json({error:'CONFIG_INVALID'});
   const pts=new Set(['EFM','EFIT','ESB','UNMAPPED']);
-  for (const s of incoming.stores) if (!pts.has(String(s.pt).toUpperCase())) return res.status(400).json({error:`INVALID_PT:${s.pt}`});
+  const statuses=new Set(['Existing Store','New Store']);
+  for (const s of incoming.stores) {
+    if (!pts.has(String(s.pt).toUpperCase())) return res.status(400).json({error:`INVALID_PT:${s.pt}`});
+    if (!statuses.has(String(s.storeStatus||'Existing Store'))) return res.status(400).json({error:`INVALID_STORE_STATUS:${s.storeStatus}`});
+  }
+
+  const normalizedStores=incoming.stores.map(s=>({
+    name:String(s.name||'').trim().toUpperCase(),
+    rawName:String(s.rawName||'').trim(),
+    pt:String(s.pt||'UNMAPPED').toUpperCase(),
+    storeStatus:String(s.storeStatus||'Existing Store')==='New Store'?'New Store':'Existing Store',
+    active:!!s.active
+  })).filter(s=>s.name&&s.rawName);
+
+  // One display store may have several raw mappings. Keep one Store Stat per display store.
+  const statusByStore=new Map();
+  for (const s of normalizedStores) {
+    if (!statusByStore.has(s.name)) statusByStore.set(s.name,s.storeStatus);
+    else s.storeStatus=statusByStore.get(s.name);
+  }
+
   config={
     channels:incoming.channels.map((c,i)=>({name:String(c.name||'').trim().toUpperCase(),rawName:String(c.rawName||c.name||'').trim().toUpperCase(),active:!!c.active,telemed:!!c.telemed,sort:Number(c.sort||i+1)})).filter(c=>c.name&&c.rawName),
-    stores:incoming.stores.map(s=>({name:String(s.name||'').trim().toUpperCase(),rawName:String(s.rawName||'').trim(),pt:String(s.pt||'UNMAPPED').toUpperCase(),active:!!s.active})).filter(s=>s.name&&s.rawName),
+    stores:normalizedStores,
     categoryMap:incoming.categoryMap&&typeof incoming.categoryMap==='object'?incoming.categoryMap:{},
     targets:incoming.targets&&typeof incoming.targets==='object'?incoming.targets:{},
     rankingDefault:Math.max(1,Math.min(10,Number(incoming.rankingDefault||10)))
@@ -1243,4 +1320,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Monthly closing: disabled`)));
