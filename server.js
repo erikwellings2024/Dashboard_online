@@ -858,7 +858,7 @@ app.post('/api/query/brand', requireAuth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 app.post('/api/query/items', requireAuth, (req,res)=>{
-  try { const periods=normalizePeriods(req.body.periods); const n=Math.max(1,Math.min(10,Number(req.body.topN||config.rankingDefault||10))); res.json(itemQuery(periods,req.body.filters||{},n)); }
+  try { const periods=normalizePeriods(req.body.periods); const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10))); res.json(itemQuery(periods,req.body.filters||{},n)); }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
