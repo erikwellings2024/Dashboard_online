@@ -1817,19 +1817,23 @@ async function* csvRowsFromReadable(readable){
 }
 
 async function openMetabaseCsv(settings,sessionId,startDate,endDate){
-  const form=new FormData();
-  form.append('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
+  // IMPORTANT: Metabase export parameters must be sent as
+  // application/x-www-form-urlencoded (or JSON), not multipart/form-data.
+  // The browser request captured in DevTools is URL-encoded.
+  const body=new URLSearchParams();
+  body.set('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
   // false keeps raw numeric/date values and avoids localized display formatting.
-  form.append('format_rows','false');
-  form.append('pivot_results','false');
+  body.set('format_rows','false');
+  body.set('pivot_results','false');
 
   const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/csv`,{
     method:'POST',
     headers:{
       'X-Metabase-Session':sessionId,
-      'Accept':'text/csv,application/csv,text/plain'
+      'Accept':'text/csv,application/csv,text/plain',
+      'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'
     },
-    body:form,
+    body:body.toString(),
     signal:AbortSignal.timeout(10*60*1000)
   });
 
@@ -1854,6 +1858,8 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
   let header=null;
   let rawRowsCount=0;
   let validRows=0;
+  let validTargetRows=0;
+  let ignoredOtherMonthRows=0;
   let written=0;
   let minDate=null;
   let maxDate=null;
@@ -1905,6 +1911,15 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
       validRows++;
       const mk=monthKey(n.date);
       detectedMonths.add(mk);
+
+      // Safety fallback: never write a different month into the selected
+      // monthly folder, even if the upstream export ignores parameters.
+      if(mk!==targetMonth){
+        ignoredOtherMonthRows++;
+        continue;
+      }
+
+      validTargetRows++;
       if(!minDate || n.date<minDate)minDate=n.date;
       if(!maxDate || n.date>maxDate)maxDate=n.date;
       channelSummary[n.channel]=(channelSummary[n.channel]||0)+1;
@@ -1918,9 +1933,16 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
     if(!validRows)throw new Error(`NO_VALID_ROWS. Parsed rows=${rawRowsCount}, valid rows=0.`);
 
     const months=[...detectedMonths].sort();
-    if(months.length!==1 || months[0]!==targetMonth){
+    if(!validTargetRows){
       throw new Error(
-        `MONTH_MISMATCH. Selected ${targetMonth}, but Metabase returned: ${months.join(', ')}.`
+        `MONTH_NOT_FOUND. Selected ${targetMonth}, but Metabase returned: ${months.join(', ')}.`
+      );
+    }
+
+    if(ignoredOtherMonthRows>0){
+      console.warn(
+        `[AUTO_SYNC] upstream returned extra months (${months.join(', ')}); `+
+        `ignored ${ignoredOtherMonthRows} rows outside ${targetMonth}`
       );
     }
 
@@ -1940,7 +1962,9 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
 
     return {
       rawRows:rawRowsCount,
-      validRows,
+      validRows:validTargetRows,
+      validRowsAllMonths:validRows,
+      ignoredOtherMonthRows,
       minDate,
       maxDate,
       detectedMonths:months,
@@ -1957,18 +1981,19 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
 
 
 async function downloadMetabaseXlsx(settings,sessionId,startDate,endDate,targetFile){
-  const form=new FormData();
-  form.append('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
-  form.append('format_rows','true');
-  form.append('pivot_results','false');
+  const body=new URLSearchParams();
+  body.set('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
+  body.set('format_rows','true');
+  body.set('pivot_results','false');
 
   const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/xlsx`,{
     method:'POST',
     headers:{
       'X-Metabase-Session':sessionId,
-      'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream'
+      'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream',
+      'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'
     },
-    body:form,
+    body:body.toString(),
     signal:AbortSignal.timeout(10*60*1000)
   });
 
@@ -2099,7 +2124,7 @@ async function runMetabaseAutoSync(trigger='scheduler'){
   dataWriteOwner=`auto-sync:${trigger}`;
 
   try{
-    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream`);
+    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream-urlencoded`);
 
     const sessionId=await metabaseLogin(settings);
     const response=await openMetabaseCsv(
@@ -2596,4 +2621,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Monthly closing: disabled`)));
