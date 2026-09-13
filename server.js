@@ -1601,7 +1601,7 @@ function publicAutoSyncStatus(){
     ...autoSyncStatus,
     running:!!autoSyncStatus.running,
     configured:autoSyncConfigured(),
-    source:s.questionId?`Metabase Question ${s.questionId}`:'Metabase',
+    source:s.questionId?`Metabase Question ${s.questionId} • CSV Streaming`:'Metabase • CSV Streaming',
     metabaseHost:(()=>{try{return new URL(s.baseUrl).host}catch{return ''}})(),
     schedule:'00:00, 06:00, 12:00, 18:00 WIB',
     timezone:'Asia/Jakarta',
@@ -1674,6 +1674,288 @@ function metabaseParameters(settings,startDate,endDate){
   ];
 }
 
+
+function createMetaAccumulator(){
+  return {
+    brands:new Set(),
+    categories:new Set(),
+    rawCategories:new Set(),
+    salesTypes:new Set(),
+    customerTypes:new Set(),
+    products:new Map()
+  };
+}
+
+function addMetaAccumulator(acc,r){
+  if(r.brand)acc.brands.add(r.brand);
+  if(r.category)acc.categories.add(r.category);
+  if(r.rawCategory)acc.rawCategories.add(String(r.rawCategory).trim().toUpperCase());
+  if(r.salesType)acc.salesTypes.add(r.salesType);
+  if(r.customerType && r.customerType!=='UNSPECIFIED')acc.customerTypes.add(r.customerType);
+
+  const sku=String(r.newItemCode||r.sku||'').trim();
+  const itemName=String(r.itemName||'').trim();
+  if(sku || itemName){
+    const key=`${sku}|${itemName}`;
+    if(!acc.products.has(key)){
+      acc.products.set(key,{
+        sku,
+        newItemCode:r.newItemCode||'',
+        itemName,
+        brand:r.brand||''
+      });
+    }
+  }
+}
+
+function mergeMetaAccumulator(target,acc){
+  const brands=new Set(target.brands||[]);
+  const categories=new Set(target.categories||[]);
+  const rawCategories=new Set(target.rawCategories||[]);
+  const salesTypes=new Set(target.salesTypes||[]);
+  const customerTypes=new Set(target.customerTypes||[]);
+  const products=new Map((target.products||[]).map(p=>[`${p.sku}|${p.itemName}`,p]));
+
+  for(const x of acc.brands)brands.add(x);
+  for(const x of acc.categories)categories.add(x);
+  for(const x of acc.rawCategories)rawCategories.add(x);
+  for(const x of acc.salesTypes)salesTypes.add(x);
+  for(const x of acc.customerTypes)customerTypes.add(x);
+  for(const [k,p] of acc.products){
+    if(!products.has(k))products.set(k,p);
+  }
+
+  return {
+    brands:[...brands].sort(),
+    categories:[...categories].sort(),
+    rawCategories:[...rawCategories].sort(),
+    salesTypes:[...salesTypes].sort(),
+    customerTypes:[...customerTypes].sort(),
+    products:[...products.values()]
+  };
+}
+
+// RFC4180-compatible streaming parser.
+// Keeps only one field + one row in memory and handles quoted commas,
+// escaped quotes, CRLF, embedded newlines and UTF-8 chunk boundaries.
+async function* csvRowsFromReadable(readable){
+  const decoder=new TextDecoder('utf-8');
+  let field='';
+  let row=[];
+  let state='OUT'; // OUT, IN_QUOTE, AFTER_QUOTE
+
+  async function* consume(text){
+    for(let i=0;i<text.length;i++){
+      const c=text[i];
+
+      if(state==='IN_QUOTE'){
+        if(c==='"')state='AFTER_QUOTE';
+        else field+=c;
+        continue;
+      }
+
+      if(state==='AFTER_QUOTE'){
+        if(c==='"'){
+          field+='"';
+          state='IN_QUOTE';
+        }else if(c===','){
+          row.push(field);
+          field='';
+          state='OUT';
+        }else if(c==='\n'){
+          row.push(field);
+          field='';
+          const finished=row;
+          row=[];
+          state='OUT';
+          yield finished;
+        }else if(c==='\r'){
+          // Ignore CR in CRLF after a closing quote.
+        }else{
+          // Lenient fallback for non-standard characters after a quote.
+          field+=c;
+          state='OUT';
+        }
+        continue;
+      }
+
+      // OUT
+      if(c==='"' && field.length===0){
+        state='IN_QUOTE';
+      }else if(c===','){
+        row.push(field);
+        field='';
+      }else if(c==='\n'){
+        row.push(field);
+        field='';
+        const finished=row;
+        row=[];
+        yield finished;
+      }else if(c==='\r'){
+        // Ignore CR; LF completes the row.
+      }else{
+        field+=c;
+      }
+    }
+  }
+
+  for await(const chunk of readable){
+    const text=decoder.decode(chunk,{stream:true});
+    for await(const r of consume(text))yield r;
+  }
+
+  const tail=decoder.decode();
+  if(tail){
+    for await(const r of consume(tail))yield r;
+  }
+
+  if(state==='AFTER_QUOTE')state='OUT';
+  if(field.length || row.length){
+    row.push(field);
+    yield row;
+  }
+}
+
+async function openMetabaseCsv(settings,sessionId,startDate,endDate){
+  const form=new FormData();
+  form.append('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
+  // false keeps raw numeric/date values and avoids localized display formatting.
+  form.append('format_rows','false');
+  form.append('pivot_results','false');
+
+  const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/csv`,{
+    method:'POST',
+    headers:{
+      'X-Metabase-Session':sessionId,
+      'Accept':'text/csv,application/csv,text/plain'
+    },
+    body:form,
+    signal:AbortSignal.timeout(10*60*1000)
+  });
+
+  if(!r.ok){
+    const txt=(await r.text().catch(()=>'' )).slice(0,500);
+    throw new Error(`METABASE_CSV_FAILED (${r.status})${txt?': '+txt:''}`);
+  }
+  if(!r.body)throw new Error('METABASE_CSV_FAILED: empty response');
+
+  return r;
+}
+
+async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
+  const targetFile=monthPath(targetMonth);
+  await fsp.mkdir(path.dirname(targetFile),{recursive:true});
+
+  const tmp=`${targetFile}.${process.pid}.${Date.now()}.auto.tmp`;
+  const fileOut=fs.createWriteStream(tmp);
+  const gzip=zlib.createGzip({level:6});
+  gzip.pipe(fileOut);
+
+  let header=null;
+  let rawRowsCount=0;
+  let validRows=0;
+  let written=0;
+  let minDate=null;
+  let maxDate=null;
+  const detectedMonths=new Set();
+  const channelSummary={};
+  const metaAcc=createMetaAccumulator();
+
+  const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','customer_type','trader_check','sub_total'];
+  const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
+
+  try{
+    await writeWithBackpressure(gzip,'[');
+
+    const readable=Readable.fromWeb(webBody);
+
+    for await(const cells of csvRowsFromReadable(readable)){
+      if(!header){
+        header=cells.map((x,i)=>{
+          let s=String(x??'').trim();
+          if(i===0)s=s.replace(/^\uFEFF/,'');
+          return s;
+        });
+
+        const set=new Set(header);
+        const hasRequired=required.every(k=>set.has(k));
+        const hasChannel=channelColumns.some(k=>set.has(k));
+        if(!hasRequired || !hasChannel){
+          throw new Error(
+            `RAW_FORMAT_INVALID. CSV required columns: ${required.join(', ')}. `+
+            `Channel column: one of ${channelColumns.join(', ')}. `+
+            `Received: ${header.join(', ')}`
+          );
+        }
+        continue;
+      }
+
+      // Skip fully empty rows.
+      if(!cells.some(v=>String(v??'').trim()!==''))continue;
+
+      rawRowsCount++;
+      const raw={};
+      for(let i=0;i<header.length;i++){
+        raw[header[i]]=cells[i]??'';
+      }
+
+      const n=normalizeRow(raw);
+      if(!(n.date && n.invoice && n.channel))continue;
+
+      validRows++;
+      const mk=monthKey(n.date);
+      detectedMonths.add(mk);
+      if(!minDate || n.date<minDate)minDate=n.date;
+      if(!maxDate || n.date>maxDate)maxDate=n.date;
+      channelSummary[n.channel]=(channelSummary[n.channel]||0)+1;
+      addMetaAccumulator(metaAcc,n);
+
+      await writeWithBackpressure(gzip,(written?',':'')+JSON.stringify(n));
+      written++;
+    }
+
+    if(!header)throw new Error('RAW_FORMAT_INVALID. Metabase CSV has no header row.');
+    if(!validRows)throw new Error(`NO_VALID_ROWS. Parsed rows=${rawRowsCount}, valid rows=0.`);
+
+    const months=[...detectedMonths].sort();
+    if(months.length!==1 || months[0]!==targetMonth){
+      throw new Error(
+        `MONTH_MISMATCH. Selected ${targetMonth}, but Metabase returned: ${months.join(', ')}.`
+      );
+    }
+
+    await writeWithBackpressure(gzip,']');
+
+    await new Promise((resolve,reject)=>{
+      let settled=false;
+      const fail=e=>{if(!settled){settled=true;reject(e)}};
+      fileOut.once('error',fail);
+      gzip.once('error',fail);
+      fileOut.once('finish',()=>{if(!settled){settled=true;resolve()}});
+      gzip.end();
+    });
+
+    await fsp.rename(tmp,targetFile);
+    await fsp.unlink(monthJsonPath(targetMonth)).catch(()=>{});
+
+    return {
+      rawRows:rawRowsCount,
+      validRows,
+      minDate,
+      maxDate,
+      detectedMonths:months,
+      channelSummary,
+      metaAcc
+    };
+  }catch(e){
+    try{gzip.destroy()}catch{}
+    try{fileOut.destroy()}catch{}
+    await fsp.unlink(tmp).catch(()=>{});
+    throw e;
+  }
+}
+
+
 async function downloadMetabaseXlsx(settings,sessionId,startDate,endDate,targetFile){
   const form=new FormData();
   form.append('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
@@ -1735,9 +2017,8 @@ async function finalizeAutomatedMonthReplace(targetMonth,sourceFile,fileSize,str
   };
   await writeJsonAtomic(MONTH_INDEX_FILE,monthIndex);
 
-  const freshMonth=await readMonthRows(targetMonth);
-  if(Array.isArray(freshMonth) && freshMonth.length){
-    metaIndex=mergeMetaRows(metaIndex,freshMonth);
+  if(streamed.metaAcc){
+    metaIndex=mergeMetaAccumulator(metaIndex,streamed.metaAcc);
     await writeJsonAtomic(META_INDEX_FILE,metaIndex);
   }
 
@@ -1817,27 +2098,24 @@ async function runMetabaseAutoSync(trigger='scheduler'){
   dataWriteBusy=true;
   dataWriteOwner=`auto-sync:${trigger}`;
 
-  const tempBase=path.join(UPLOAD_DIR,`metabase-auto-${range.targetMonth}-${Date.now()}.xlsx`);
-  let normalizedZipFile=null;
-
   try{
-    await fsp.mkdir(UPLOAD_DIR,{recursive:true});
-    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate}`);
+    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream`);
 
     const sessionId=await metabaseLogin(settings);
-    const dl=await downloadMetabaseXlsx(settings,sessionId,range.startDate,range.endDate,tempBase);
+    const response=await openMetabaseCsv(
+      settings,sessionId,range.startDate,range.endDate
+    );
 
-    let parserFile=tempBase;
-    if(await xlsxNeedsZipNormalization(tempBase)){
-      normalizedZipFile=await normalizeXlsxZipDescriptors(tempBase);
-      parserFile=normalizedZipFile;
-      console.log('[AUTO_SYNC] standardized XLSX ZIP descriptors');
-    }
+    console.log('[AUTO_SYNC] Metabase CSV stream opened; parsing row-by-row');
 
-    const streamed=await streamReplaceMonthFromXlsx(parserFile,range.targetMonth);
-    const sourceFile=`Metabase Q${settings.questionId} ${range.startDate} to ${range.endDate}.xlsx`;
+    const streamed=await streamReplaceMonthFromMetabaseCsv(
+      response.body,range.targetMonth
+    );
+
+    const sourceFile=`Metabase Q${settings.questionId} ${range.startDate} to ${range.endDate}.csv`;
+    const contentLength=Number(response.headers.get('content-length')||0);
     const finalized=await finalizeAutomatedMonthReplace(
-      range.targetMonth,sourceFile,dl.fileSize,streamed,trigger
+      range.targetMonth,sourceFile,contentLength,streamed,trigger
     );
 
     const durationMs=Date.now()-started;
@@ -1889,8 +2167,6 @@ async function runMetabaseAutoSync(trigger='scheduler'){
   }finally{
     dataWriteBusy=false;
     dataWriteOwner=null;
-    if(normalizedZipFile)await fsp.unlink(normalizedZipFile).catch(()=>{});
-    await fsp.unlink(tempBase).catch(()=>{});
   }
 }
 
@@ -2320,4 +2596,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream: enabled | Monthly closing: disabled`)));
