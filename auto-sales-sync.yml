@@ -1,5 +1,4 @@
-name: Auto Sales Sync
-
+name: .github/workflows/auto-sales-sync.yml
 on:
   schedule:
     # GitHub cron uses UTC.
