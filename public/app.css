@@ -714,3 +714,40 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 @media(max-width:900px){
   .auto-sync-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}
 }
+
+
+/* v30 — update badge + target table refinements */
+.update-chip{
+  font-size:14px !important;
+  font-weight:700 !important;
+  padding:9px 13px !important;
+  line-height:1.2;
+  white-space:nowrap;
+  border-width:1px;
+}
+
+#categoryTargetTable .category-target-table .no-col{
+  width:34px !important;
+  min-width:34px !important;
+  max-width:34px !important;
+  padding-left:3px !important;
+  padding-right:3px !important;
+}
+#categoryTargetTable .category-target-table th:nth-child(2){
+  min-width:245px;
+}
+#categoryTargetTable .category-target-table th:nth-child(8),
+#categoryTargetTable .category-target-table td:nth-child(8){
+  min-width:76px;
+}
+#categoryTargetTable .category-target-table th:nth-child(9),
+#categoryTargetTable .category-target-table th:nth-child(10){
+  min-width:112px;
+}
+#categoryTargetTable .category-target-table th:nth-child(11){
+  min-width:125px;
+}
+#categoryTargetTable .category-target-table th:nth-child(12),
+#categoryTargetTable .category-target-table td:nth-child(12){
+  min-width:92px;
+}
