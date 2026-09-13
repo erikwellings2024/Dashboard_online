@@ -1,8 +1,8 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20260911-25"></head>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20260913-27"></head>
 <body>
-<header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT/Store Stat, target online/category, mapping category, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
+<header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT/Store Stat, target online/category, mapping category, auto update sales, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
 <main class="admin-page">
-<div class="admin-tabs"><button class="admin-tab active" data-tab="upload">Upload Raw</button><button class="admin-tab" data-tab="channel">Channel</button><button class="admin-tab" data-tab="store">Store / PT</button><button class="admin-tab" data-tab="target">Target Online</button><button class="admin-tab" data-tab="targetCategory">Target Category</button><button class="admin-tab" data-tab="categoryMap">Mapping Category</button><button class="admin-tab" data-tab="users">User Management</button></div>
+<div class="admin-tabs"><button class="admin-tab active" data-tab="upload">Upload Raw</button><button class="admin-tab" data-tab="channel">Channel</button><button class="admin-tab" data-tab="store">Store / PT</button><button class="admin-tab" data-tab="target">Target Online</button><button class="admin-tab" data-tab="targetCategory">Target Category</button><button class="admin-tab" data-tab="categoryMap">Mapping Category</button><button class="admin-tab" data-tab="autoSync">Auto Update Sales</button><button class="admin-tab" data-tab="users">User Management</button></div>
 <section class="admin-panel active" id="tab-upload">
 <div class="admin-box">
   <h2>Monthly Raw Sales Storage</h2>
@@ -65,5 +65,41 @@
 <section class="admin-panel" id="tab-target"><div class="admin-box"><h2>Target Online Setup</h2><p>Target Best Est Online disimpan per bulan dan per channel. Pilih bulan, isi target, lalu Save.</p><div class="form-row"><div><label>Target Month</label><input id="targetConfigMonth" type="month" value="2026-09"></div><div><button class="btn" id="loadTarget">Load Month</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="targetTable"><thead><tr><th>Channel</th><th>Target Best Est</th></tr></thead><tbody></tbody></table></div><button class="btn green" id="saveTarget">Save Target</button><div id="targetMsg"></div></div></section>
 <section class="admin-panel" id="tab-targetCategory"><div class="admin-box"><h2>Target Category Setup</h2><p>Target Best Est Category disimpan per bulan berdasarkan Category hasil Mapping Category.</p><div class="form-row"><div><label>Target Month</label><input id="categoryTargetConfigMonth" type="month" value="2026-09"></div><div><button class="btn" id="loadCategoryTarget">Load Month</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="categoryTargetTable"><thead><tr><th>Category</th><th>Target Best Est</th></tr></thead><tbody></tbody></table></div><button class="btn green" id="saveCategoryTarget">Save Target Category</button><div id="categoryTargetMsg"></div></div></section>
 <section class="admin-panel" id="tab-categoryMap"><div class="admin-box"><h2>Mapping Category</h2><p>Mapping dari raw Excel header <b>category_2</b> menjadi Category dashboard. Semua filter Category dan Section 3 mengikuti mapping ini.</p><div class="table-wrap"><table class="admin-table" id="categoryMapTable"><thead><tr><th>Raw category_2</th><th>Dashboard Category</th><th>Sort</th><th>Action</th></tr></thead><tbody></tbody></table></div><button class="btn" id="addCategoryMap">+ Add Mapping</button><button class="btn green" id="saveCategoryMap">Save Mapping Category</button><div id="categoryMapMsg"></div></div></section>
+<section class="admin-panel" id="tab-autoSync">
+<div class="admin-box">
+  <h2>Auto Update Sales</h2>
+  <p>
+    Sinkronisasi otomatis dari Metabase Question 364. Tanggal otomatis menggunakan
+    <b>tanggal 1 bulan berjalan sampai tanggal hari ini</b> berdasarkan zona waktu <b>Asia/Jakarta</b>.
+    Scheduler eksternal dijalankan 4× sehari: <b>00:00, 06:00, 12:00, 18:00 WIB</b>.
+  </p>
+
+  <div class="auto-sync-grid">
+    <div class="auto-sync-card"><span>Configuration</span><b id="autoSyncConfigured">-</b></div>
+    <div class="auto-sync-card"><span>Source</span><b id="autoSyncSource">-</b></div>
+    <div class="auto-sync-card"><span>Schedule</span><b id="autoSyncSchedule">00:00 • 06:00 • 12:00 • 18:00 WIB</b></div>
+    <div class="auto-sync-card"><span>Date Rule</span><b id="autoSyncDateRule">Tanggal 1 → Hari Ini</b></div>
+    <div class="auto-sync-card"><span>Last Result</span><b id="autoSyncResult">-</b></div>
+    <div class="auto-sync-card"><span>Last Run</span><b id="autoSyncLastRun">-</b></div>
+    <div class="auto-sync-card"><span>Data Range</span><b id="autoSyncRange">-</b></div>
+    <div class="auto-sync-card"><span>Rows</span><b id="autoSyncRows">-</b></div>
+    <div class="auto-sync-card"><span>Duration</span><b id="autoSyncDuration">-</b></div>
+    <div class="auto-sync-card"><span>Trigger</span><b id="autoSyncTrigger">-</b></div>
+  </div>
+
+  <div class="auto-sync-note">
+    Credential Metabase tidak ditampilkan dan tidak disimpan di halaman ini.
+    Simpan <b>METABASE_USERNAME</b>, <b>METABASE_PASSWORD</b>, dan <b>AUTO_SYNC_SECRET</b>
+    di Railway Variables.
+  </div>
+
+  <div class="auto-sync-actions">
+    <button class="btn green" id="runAutoSync">RUN NOW</button>
+    <button class="btn" id="refreshAutoSync">Refresh Status</button>
+  </div>
+  <div id="autoSyncMsg"></div>
+  <div id="autoSyncError" class="auto-sync-error hidden"></div>
+</div>
+</section>
 <section class="admin-panel" id="tab-users"><div class="admin-box"><h2>User Management</h2><p>Admin dapat membuat akun Admin/Guest, reset password, ubah role, aktif/nonaktifkan, dan menghapus user. Guest tidak memiliki akses ke halaman ini.</p><div class="form-row"><div><label>Username</label><input id="newUsername"></div><div><label>Display Name</label><input id="newDisplayName"></div><div><label>Password</label><input id="newPassword" type="password"></div><div><label>Role</label><select id="newRole"><option value="guest">Guest</option><option value="admin">Admin</option></select></div><div><button class="btn green" id="addUser">Add User</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="userTable"><thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Active</th><th>New Password</th><th>Action</th></tr></thead><tbody></tbody></table></div><div id="userMsg"></div></div></section>
-</main><script src="/admin.js?v=20260911-25"></script></body></html>
+</main><script src="/admin.js?v=20260913-27"></script></body></html>

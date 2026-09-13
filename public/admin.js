@@ -105,6 +105,73 @@ $('#saveCategoryMap').onclick=async()=>{
   }catch(e){msg('#categoryMapMsg',e.message,false)}
 };
 
+
+function syncDate(v){
+  if(!v)return '-';
+  try{return new Date(v).toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})+' WIB'}
+  catch{return v}
+}
+function syncDuration(ms){
+  const n=Number(ms||0);
+  if(!n)return '-';
+  if(n<1000)return `${n} ms`;
+  const s=Math.round(n/1000);
+  if(s<60)return `${s} sec`;
+  return `${Math.floor(s/60)}m ${s%60}s`;
+}
+async function loadAutoSyncStatus(){
+  const s=await api('/api/admin/auto-sync/status');
+  $('#autoSyncConfigured').textContent=s.configured?'READY':'NOT CONFIGURED';
+  $('#autoSyncConfigured').className=s.configured?'status-ok':'status-bad';
+  $('#autoSyncSource').textContent=`${s.source||'Metabase'}${s.metabaseHost?' • '+s.metabaseHost:''}`;
+  $('#autoSyncSchedule').textContent=s.schedule||'00:00 • 06:00 • 12:00 • 18:00 WIB';
+  $('#autoSyncDateRule').textContent=s.dateRule||'Tanggal 1 bulan berjalan → tanggal hari ini';
+  $('#autoSyncResult').textContent=s.running?'RUNNING':(s.lastResult||'-');
+  $('#autoSyncResult').className=s.running?'status-running':s.lastResult==='SUCCESS'?'status-ok':s.lastResult==='FAILED'?'status-bad':'';
+  $('#autoSyncLastRun').textContent=syncDate(s.lastSuccessAt||s.lastAttemptAt);
+  $('#autoSyncRange').textContent=s.lastStartDate&&s.lastEndDate?`${s.lastStartDate} → ${s.lastEndDate}`:'-';
+  $('#autoSyncRows').textContent=s.lastRows==null?'-':Number(s.lastRows).toLocaleString('id-ID');
+  $('#autoSyncDuration').textContent=syncDuration(s.lastDurationMs);
+  $('#autoSyncTrigger').textContent=s.lastTrigger||'-';
+  $('#runAutoSync').disabled=!s.configured||s.running;
+
+  const err=$('#autoSyncError');
+  if(s.lastError){
+    err.textContent=`Last Error: ${s.lastError}`;
+    err.classList.remove('hidden');
+  }else{
+    err.textContent='';
+    err.classList.add('hidden');
+  }
+  return s;
+}
+$('#refreshAutoSync').onclick=async()=>{
+  try{await loadAutoSyncStatus();msg('#autoSyncMsg','Status refreshed.')}
+  catch(e){msg('#autoSyncMsg',e.message,false)}
+};
+$('#runAutoSync').onclick=async()=>{
+  const b=$('#runAutoSync');
+  if(!confirm('Run Auto Update Sales sekarang? Data bulan berjalan akan di-replace dari Metabase tanggal 1 sampai hari ini.'))return;
+  try{
+    b.disabled=true;b.textContent='SYNCING...';
+    msg('#autoSyncMsg','Auto Sync sedang berjalan. Jangan upload manual sampai proses selesai.');
+    const r=await api('/api/admin/auto-sync/run',{method:'POST',body:'{}'});
+    msg('#autoSyncMsg',`SUCCESS • ${r.startDate} → ${r.endDate} • ${Number(r.rows||0).toLocaleString('id-ID')} rows`);
+    META=await api('/api/meta');
+    renderRuntime();
+    renderMonthStorage();
+    renderUploadHistory();
+    await loadAutoSyncStatus();
+  }catch(e){
+    msg('#autoSyncMsg',e.message,false);
+    await loadAutoSyncStatus().catch(()=>{});
+  }finally{
+    b.textContent='RUN NOW';
+    const s=await loadAutoSyncStatus().catch(()=>null);
+    b.disabled=!s?.configured||!!s?.running;
+  }
+};
+
 async function loadUsers(){USERS=await api('/api/admin/users');renderUsers()}
 function renderUsers(){$('#userTable tbody').innerHTML=USERS.map(u=>`<tr data-id="${u.id}"><td>${esc(u.username)}</td><td><input class="u-name" value="${esc(u.displayName||u.username)}"></td><td><select class="u-role"><option value="guest" ${u.role==='guest'?'selected':''}>Guest</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td><td class="center"><input class="u-active" type="checkbox" ${u.active?'checked':''}></td><td><input class="u-pass" type="password" placeholder="Leave blank"></td><td class="action-cell"><button class="btn save-user">Save</button> <button class="btn red delete-user">Delete</button></td></tr>`).join('');$$('.save-user').forEach(b=>b.onclick=()=>saveUser(b.closest('tr')));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.closest('tr')))}
 async function saveUser(r){try{const body={displayName:$('.u-name',r).value,role:$('.u-role',r).value,active:$('.u-active',r).checked};if($('.u-pass',r).value)body.password=$('.u-pass',r).value;await api('/api/admin/users/'+r.dataset.id,{method:'PUT',body:JSON.stringify(body)});await loadUsers();msg('#userMsg','User updated.')}catch(e){msg('#userMsg',e.message,false)}}
@@ -257,6 +324,7 @@ async function boot(){
   renderUploadPolicy();
   renderMonthStorage();
   renderUploadHistory();
+  await loadAutoSyncStatus();
   await loadUsers();
 }
 boot().catch(e=>{
