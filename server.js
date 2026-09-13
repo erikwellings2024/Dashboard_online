@@ -154,7 +154,12 @@ let autoSyncStatus = {
   lastRows:null,
   lastDurationMs:null,
   lastTrigger:null,
-  lastSourceFile:null
+  lastSourceFile:null,
+  lastSchedulerAttemptAt:null,
+  lastSchedulerSuccessAt:null,
+  lastSchedulerResult:null,
+  lastSchedulerError:null,
+  lastSchedulerDurationMs:null
 };
 let dataWriteBusy=false;
 let dataWriteOwner=null;
@@ -2118,7 +2123,12 @@ async function runMetabaseAutoSync(trigger='scheduler'){
     lastStartDate:range.startDate,
     lastEndDate:range.endDate,
     lastTargetMonth:range.targetMonth,
-    lastTrigger:trigger
+    lastTrigger:trigger,
+    ...(trigger==='github-actions'?{
+      lastSchedulerAttemptAt:attemptAt,
+      lastSchedulerResult:'RUNNING',
+      lastSchedulerError:null
+    }:{})
   };
   dataWriteBusy=true;
   dataWriteOwner=`auto-sync:${trigger}`;
@@ -2157,7 +2167,13 @@ async function runMetabaseAutoSync(trigger='scheduler'){
       lastRows:streamed.validRows,
       lastDurationMs:durationMs,
       lastTrigger:trigger,
-      lastSourceFile:sourceFile
+      lastSourceFile:sourceFile,
+      ...(trigger==='github-actions'?{
+        lastSchedulerSuccessAt:new Date().toISOString(),
+        lastSchedulerResult:'SUCCESS',
+        lastSchedulerError:null,
+        lastSchedulerDurationMs:durationMs
+      }:{})
     };
     await persistAutoSyncStatus();
 
@@ -2184,7 +2200,12 @@ async function runMetabaseAutoSync(trigger='scheduler'){
       lastResult:'FAILED',
       lastError:String(e.message||e).slice(0,800),
       lastDurationMs:Date.now()-started,
-      lastTrigger:trigger
+      lastTrigger:trigger,
+      ...(trigger==='github-actions'?{
+        lastSchedulerResult:'FAILED',
+        lastSchedulerError:String(e.message||e).slice(0,500),
+        lastSchedulerDurationMs:Date.now()-started
+      }:{})
     };
     await persistAutoSyncStatus().catch(()=>{});
     console.error(`[AUTO_SYNC] failed trigger=${trigger}:`,e.message);
@@ -2269,6 +2290,45 @@ app.get('/api/meta', requireAuth, (req,res)=>{
     monthSlots:monthSlots(),
     minDate:totals.minDate,
     maxDate:totals.maxDate
+  });
+});
+
+
+app.get('/api/auto-sync/health', requireAuth, (req,res)=>{
+  const fallbackSchedulerSuccess =
+    autoSyncStatus.lastTrigger==='github-actions' && autoSyncStatus.lastResult==='SUCCESS'
+      ? autoSyncStatus.lastSuccessAt
+      : null;
+
+  const fallbackSchedulerAttempt =
+    autoSyncStatus.lastTrigger==='github-actions'
+      ? autoSyncStatus.lastAttemptAt
+      : null;
+
+  const fallbackSchedulerResult =
+    autoSyncStatus.lastTrigger==='github-actions'
+      ? autoSyncStatus.lastResult
+      : null;
+
+  const fallbackSchedulerError =
+    autoSyncStatus.lastTrigger==='github-actions' && autoSyncStatus.lastResult==='FAILED'
+      ? autoSyncStatus.lastError
+      : null;
+
+  res.json({
+    configured:autoSyncConfigured(),
+    running:!!autoSyncStatus.running,
+    lastAttemptAt:autoSyncStatus.lastAttemptAt||null,
+    lastSuccessAt:autoSyncStatus.lastSuccessAt||null,
+    lastResult:autoSyncStatus.lastResult||null,
+    lastTrigger:autoSyncStatus.lastTrigger||null,
+    lastSchedulerAttemptAt:autoSyncStatus.lastSchedulerAttemptAt||fallbackSchedulerAttempt||null,
+    lastSchedulerSuccessAt:autoSyncStatus.lastSchedulerSuccessAt||fallbackSchedulerSuccess||null,
+    lastSchedulerResult:autoSyncStatus.lastSchedulerResult||fallbackSchedulerResult||null,
+    lastSchedulerError:autoSyncStatus.lastSchedulerError||fallbackSchedulerError||null,
+    schedule:['00:00','06:00','12:00','18:00'],
+    timezone:'Asia/Jakarta',
+    graceMinutes:10
   });
 });
 
