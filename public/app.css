@@ -751,3 +751,46 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 #categoryTargetTable .category-target-table td:nth-child(12){
   min-width:92px;
 }
+
+
+/* v31 — scheduler health indicator */
+.update-chip{
+  max-width:680px;
+  white-space:normal !important;
+  text-align:center;
+  transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+
+.update-chip.auto-ok{
+  background:#f1f7f3;
+  border-color:#b8d1bf;
+  color:#167235;
+}
+
+.update-chip.auto-running{
+  background:#eef6ff;
+  border-color:#86b5df;
+  color:#155d95;
+}
+
+.update-chip.auto-late{
+  background:#fff4d6;
+  border-color:#dfb54c;
+  color:#855a00;
+}
+
+.update-chip.auto-failed{
+  background:#ffe5e5;
+  border-color:#d35b5b;
+  color:#a51e1e;
+}
+
+.update-chip.auto-not-configured{
+  background:#fff0e0;
+  border-color:#d59049;
+  color:#8a4b00;
+}
+
+@media(max-width:1250px){
+  .update-chip{max-width:520px;font-size:12px!important}
+}
