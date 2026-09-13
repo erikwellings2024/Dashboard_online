@@ -30,6 +30,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined cache
 const RAW_CACHE_GZ_FILE = path.join(DATA_DIR, 'raw-cache.json.gz');
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
+const AUTO_SYNC_FILE = path.join(DATA_DIR, 'auto-sync.json');
 const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
 const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
 const META_INDEX_FILE = path.join(DATA_DIR, 'meta-index.json');
@@ -137,10 +138,31 @@ let rawRows = []; // legacy compatibility only; v22 no longer keeps all history 
 let metaIndex = { brands:[], categories:[], rawCategories:[], salesTypes:[], customerTypes:[], products:[] };
 let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
 let monthIndex = {};
+let autoSyncStatus = {
+  running:false,
+  configured:false,
+  schedule:'00:00, 06:00, 12:00, 18:00 WIB',
+  timezone:'Asia/Jakarta',
+  dateRule:'1st of current month → today',
+  lastAttemptAt:null,
+  lastSuccessAt:null,
+  lastResult:null,
+  lastError:null,
+  lastStartDate:null,
+  lastEndDate:null,
+  lastTargetMonth:null,
+  lastRows:null,
+  lastDurationMs:null,
+  lastTrigger:null,
+  lastSourceFile:null
+};
+let dataWriteBusy=false;
+let dataWriteOwner=null;
 
 
-// v26: keep heavy dashboard aggregation memory-safe for multiple simultaneous users.
-// Railway Free/Trial RAM is limited, so only one raw-data aggregation runs at a time.
+// v27: multi-user memory safety.
+// Only a small number of raw-data aggregations may run simultaneously.
+// Identical requests are cached briefly so multiple viewers can share results.
 const QUERY_CONCURRENCY = Math.max(1, Number(process.env.QUERY_CONCURRENCY || 1));
 const QUERY_CACHE_TTL_MS = Math.max(5000, Number(process.env.QUERY_CACHE_TTL_MS || 60000));
 const QUERY_CACHE_MAX = Math.max(10, Number(process.env.QUERY_CACHE_MAX || 60));
@@ -189,7 +211,6 @@ async function runHeavyQuery(name,body,fn){
   if(hit && Date.now()-hit.at<=QUERY_CACHE_TTL_MS)return hit.value;
 
   return withHeavyQuerySlot(async()=>{
-    // Re-check after waiting: another user may have computed the same view.
     const second=queryResultCache.get(key);
     if(second && Date.now()-second.at<=QUERY_CACHE_TTL_MS)return second.value;
     const value=await fn();
@@ -203,6 +224,7 @@ function invalidateQueryCache(){
   queryRevision++;
   queryResultCache.clear();
 }
+
 
 async function readJson(file, fallback) {
   try { return JSON.parse(await fsp.readFile(file, 'utf8')); }
@@ -545,6 +567,8 @@ async function bootstrap() {
   // one month is compressed, verified/renamed, then the old JSON is deleted.
   await migrateMonthlyStorageToGzip();
   await compressLegacyRawCache();
+
+  autoSyncStatus={...autoSyncStatus,...(await readJson(AUTO_SYNC_FILE,{})),running:false,configured:autoSyncConfigured()};
 
   runtime = await readJson(RUNTIME_FILE, runtime);
   const totals=monthIndexTotals();
@@ -1548,6 +1572,329 @@ function monthKeysInRange(start,end) {
   return out;
 }
 
+
+function envText(name, fallback=''){
+  const v=process.env[name];
+  return v===undefined || v===null ? fallback : String(v).trim();
+}
+
+function metabaseSettings(){
+  return {
+    baseUrl:envText('METABASE_URL','https://wrpt.rcloud.id').replace(/\/+$/,''),
+    username:envText('METABASE_USERNAME'),
+    password:envText('METABASE_PASSWORD'),
+    questionId:envText('METABASE_QUESTION_ID','364'),
+    startParamId:envText('METABASE_START_PARAM_ID','686090f7-5f68-4cbf-bd75-b10ef09f4781'),
+    endParamId:envText('METABASE_END_PARAM_ID','8d7c1ee3-44a3-45e3-b056-dfb1fc99ca76'),
+    triggerSecret:envText('AUTO_SYNC_SECRET')
+  };
+}
+
+function autoSyncConfigured(){
+  const s=metabaseSettings();
+  return !!(s.baseUrl && s.username && s.password && s.questionId && s.triggerSecret);
+}
+
+function publicAutoSyncStatus(){
+  const s=metabaseSettings();
+  return {
+    ...autoSyncStatus,
+    running:!!autoSyncStatus.running,
+    configured:autoSyncConfigured(),
+    source:s.questionId?`Metabase Question ${s.questionId}`:'Metabase',
+    metabaseHost:(()=>{try{return new URL(s.baseUrl).host}catch{return ''}})(),
+    schedule:'00:00, 06:00, 12:00, 18:00 WIB',
+    timezone:'Asia/Jakarta',
+    dateRule:'Tanggal 1 bulan berjalan → tanggal hari ini',
+    credentialState:{
+      url:!!s.baseUrl,
+      username:!!s.username,
+      password:!!s.password,
+      questionId:!!s.questionId,
+      triggerSecret:!!s.triggerSecret
+    }
+  };
+}
+
+async function persistAutoSyncStatus(){
+  const safe={...autoSyncStatus,running:false,configured:autoSyncConfigured()};
+  await writeJsonAtomic(AUTO_SYNC_FILE,safe);
+}
+
+function bearerSecret(req){
+  const h=String(req.headers.authorization||'');
+  return h.startsWith('Bearer ')?h.slice(7).trim():'';
+}
+
+function secretsEqual(a,b){
+  const aa=Buffer.from(String(a||'')),bb=Buffer.from(String(b||''));
+  if(!aa.length || aa.length!==bb.length)return false;
+  return crypto.timingSafeEqual(aa,bb);
+}
+
+async function metabaseLogin(settings){
+  const r=await fetch(`${settings.baseUrl}/api/session`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Accept':'application/json'},
+    body:JSON.stringify({username:settings.username,password:settings.password}),
+    signal:AbortSignal.timeout(60000)
+  });
+  if(!r.ok){
+    const txt=(await r.text().catch(()=>'' )).slice(0,300);
+    throw new Error(`METABASE_LOGIN_FAILED (${r.status})${txt?': '+txt:''}`);
+  }
+  const d=await r.json();
+  if(!d?.id)throw new Error('METABASE_LOGIN_FAILED: session id not returned');
+  return d.id;
+}
+
+function autoSyncDateRange(){
+  const t=jakartaTodayParts();
+  return {
+    startDate:`${t.monthKey}-01`,
+    endDate:t.iso,
+    targetMonth:t.monthKey
+  };
+}
+
+function metabaseParameters(settings,startDate,endDate){
+  return [
+    {
+      id:settings.startParamId,
+      type:'date/single',
+      target:['variable',['template-tag','start_date']],
+      value:startDate
+    },
+    {
+      id:settings.endParamId,
+      type:'date/single',
+      target:['variable',['template-tag','end_date']],
+      value:endDate
+    }
+  ];
+}
+
+async function downloadMetabaseXlsx(settings,sessionId,startDate,endDate,targetFile){
+  const form=new FormData();
+  form.append('parameters',JSON.stringify(metabaseParameters(settings,startDate,endDate)));
+  form.append('format_rows','true');
+  form.append('pivot_results','false');
+
+  const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/xlsx`,{
+    method:'POST',
+    headers:{
+      'X-Metabase-Session':sessionId,
+      'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream'
+    },
+    body:form,
+    signal:AbortSignal.timeout(10*60*1000)
+  });
+
+  if(!r.ok){
+    const txt=(await r.text().catch(()=>'' )).slice(0,500);
+    throw new Error(`METABASE_XLSX_FAILED (${r.status})${txt?': '+txt:''}`);
+  }
+  if(!r.body)throw new Error('METABASE_XLSX_FAILED: empty response');
+
+  await pipeline(Readable.fromWeb(r.body),fs.createWriteStream(targetFile));
+
+  const st=await fsp.stat(targetFile);
+  if(st.size<1000)throw new Error(`METABASE_XLSX_INVALID: file too small (${st.size} bytes)`);
+
+  const fd=await fsp.open(targetFile,'r');
+  try{
+    const sig=Buffer.alloc(4);
+    await fd.read(sig,0,4,0);
+    // XLSX is a ZIP file: PK\x03\x04 or an empty ZIP variant.
+    if(sig[0]!==0x50 || sig[1]!==0x4b){
+      throw new Error('METABASE_XLSX_INVALID: response is not an XLSX/ZIP file');
+    }
+  }finally{
+    await fd.close();
+  }
+
+  return {
+    fileSize:st.size,
+    contentDisposition:r.headers.get('content-disposition')||''
+  };
+}
+
+async function finalizeAutomatedMonthReplace(targetMonth,sourceFile,fileSize,streamed,trigger){
+  const replacedRows=Number(monthIndex[targetMonth]?.rowCount||0);
+  const now=new Date().toISOString();
+
+  monthIndex[targetMonth]={
+    month:targetMonth,
+    rowCount:streamed.validRows,
+    minDate:streamed.minDate,
+    maxDate:streamed.maxDate,
+    updatedAt:now,
+    uploadedBy:'AUTO SYNC',
+    sourceFile,
+    fileSize:Number(fileSize||0)
+  };
+  await writeJsonAtomic(MONTH_INDEX_FILE,monthIndex);
+
+  const freshMonth=await readMonthRows(targetMonth);
+  if(Array.isArray(freshMonth) && freshMonth.length){
+    metaIndex=mergeMetaRows(metaIndex,freshMonth);
+    await writeJsonAtomic(META_INDEX_FILE,metaIndex);
+  }
+
+  const coverage=monthIndexTotals();
+  const entry={
+    id:crypto.randomUUID(),
+    uploadedAt:now,
+    uploadedBy:'AUTO SYNC',
+    sourceFile,
+    mode:'metabase_auto_sync',
+    trigger,
+    targetMonth,
+    detectedStart:streamed.minDate,
+    detectedEnd:streamed.maxDate,
+    incomingRows:streamed.validRows,
+    replacedRows,
+    totalRows:coverage.rowCount
+  };
+
+  runtime={
+    ...(runtime||{}),
+    updatedAt:now,
+    sourceFile,
+    rowCount:coverage.rowCount,
+    minDate:coverage.minDate,
+    maxDate:coverage.maxDate,
+    lastUpload:entry,
+    uploadHistory:Array.isArray(runtime.uploadHistory)?runtime.uploadHistory:[]
+  };
+  appendUploadHistory(entry);
+  await writeJsonAtomic(RUNTIME_FILE,runtime);
+  invalidateQueryCache();
+
+  return {entry,coverage,replacedRows};
+}
+
+async function runMetabaseAutoSync(trigger='scheduler'){
+  if(autoSyncStatus.running) {
+    const e=new Error('AUTO_SYNC_ALREADY_RUNNING');
+    e.statusCode=409;
+    throw e;
+  }
+  if(dataWriteBusy){
+    const e=new Error(`DATA_WRITE_BUSY${dataWriteOwner?`: ${dataWriteOwner}`:''}`);
+    e.statusCode=409;
+    throw e;
+  }
+
+  const settings=metabaseSettings();
+  if(!autoSyncConfigured()){
+    const e=new Error('AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME, METABASE_PASSWORD and AUTO_SYNC_SECRET in Railway Variables.');
+    e.statusCode=503;
+    throw e;
+  }
+
+  const range=autoSyncDateRange();
+  if(!monthAllowed(range.targetMonth)){
+    const e=new Error(`AUTO_SYNC_MONTH_OUT_OF_RANGE:${range.targetMonth}`);
+    e.statusCode=400;
+    throw e;
+  }
+
+  const started=Date.now();
+  const attemptAt=new Date().toISOString();
+  autoSyncStatus={
+    ...autoSyncStatus,
+    running:true,
+    configured:true,
+    lastAttemptAt:attemptAt,
+    lastResult:'RUNNING',
+    lastError:null,
+    lastStartDate:range.startDate,
+    lastEndDate:range.endDate,
+    lastTargetMonth:range.targetMonth,
+    lastTrigger:trigger
+  };
+  dataWriteBusy=true;
+  dataWriteOwner=`auto-sync:${trigger}`;
+
+  const tempBase=path.join(UPLOAD_DIR,`metabase-auto-${range.targetMonth}-${Date.now()}.xlsx`);
+  let normalizedZipFile=null;
+
+  try{
+    await fsp.mkdir(UPLOAD_DIR,{recursive:true});
+    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate}`);
+
+    const sessionId=await metabaseLogin(settings);
+    const dl=await downloadMetabaseXlsx(settings,sessionId,range.startDate,range.endDate,tempBase);
+
+    let parserFile=tempBase;
+    if(await xlsxNeedsZipNormalization(tempBase)){
+      normalizedZipFile=await normalizeXlsxZipDescriptors(tempBase);
+      parserFile=normalizedZipFile;
+      console.log('[AUTO_SYNC] standardized XLSX ZIP descriptors');
+    }
+
+    const streamed=await streamReplaceMonthFromXlsx(parserFile,range.targetMonth);
+    const sourceFile=`Metabase Q${settings.questionId} ${range.startDate} to ${range.endDate}.xlsx`;
+    const finalized=await finalizeAutomatedMonthReplace(
+      range.targetMonth,sourceFile,dl.fileSize,streamed,trigger
+    );
+
+    const durationMs=Date.now()-started;
+    autoSyncStatus={
+      ...autoSyncStatus,
+      running:false,
+      configured:true,
+      lastSuccessAt:new Date().toISOString(),
+      lastResult:'SUCCESS',
+      lastError:null,
+      lastStartDate:range.startDate,
+      lastEndDate:range.endDate,
+      lastTargetMonth:range.targetMonth,
+      lastRows:streamed.validRows,
+      lastDurationMs:durationMs,
+      lastTrigger:trigger,
+      lastSourceFile:sourceFile
+    };
+    await persistAutoSyncStatus();
+
+    console.log(`[AUTO_SYNC] success target=${range.targetMonth} rows=${streamed.validRows} durationMs=${durationMs}`);
+
+    return {
+      ok:true,
+      result:'SUCCESS',
+      startDate:range.startDate,
+      endDate:range.endDate,
+      targetMonth:range.targetMonth,
+      rows:streamed.validRows,
+      rawRows:streamed.rawRows,
+      durationMs,
+      sourceFile,
+      replacedRows:finalized.replacedRows,
+      totalRows:finalized.coverage.rowCount
+    };
+  }catch(e){
+    autoSyncStatus={
+      ...autoSyncStatus,
+      running:false,
+      configured:autoSyncConfigured(),
+      lastResult:'FAILED',
+      lastError:String(e.message||e).slice(0,800),
+      lastDurationMs:Date.now()-started,
+      lastTrigger:trigger
+    };
+    await persistAutoSyncStatus().catch(()=>{});
+    console.error(`[AUTO_SYNC] failed trigger=${trigger}:`,e.message);
+    throw e;
+  }finally{
+    dataWriteBusy=false;
+    dataWriteOwner=null;
+    if(normalizedZipFile)await fsp.unlink(normalizedZipFile).catch(()=>{});
+    await fsp.unlink(tempBase).catch(()=>{});
+  }
+}
+
+
 function uploadPolicy() {
   const t=jakartaTodayParts();
   return {
@@ -1645,7 +1992,8 @@ app.post('/api/query/channel', requireAuth, async (req,res)=>{
       return channelQuery(rows,periods,req.body.filters||{});
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.post('/api/query/target', requireAuth, async (req,res)=>{
@@ -1656,7 +2004,8 @@ app.post('/api/query/target', requireAuth, async (req,res)=>{
       return targetQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate);
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.post('/api/query/target-category', requireAuth, async (req,res)=>{
@@ -1667,8 +2016,10 @@ app.post('/api/query/target-category', requireAuth, async (req,res)=>{
       return targetCategoryQuery(rows,period,req.body.filters||{},req.body.daysTotalBestEstimate);
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
+
 
 app.post('/api/query/store', requireAuth, async (req,res)=>{
   try {
@@ -1678,7 +2029,8 @@ app.post('/api/query/store', requireAuth, async (req,res)=>{
       return storeQuery(rows,periods,req.body.filters||{},req.body.metricMode);
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.post('/api/query/brand', requireAuth, async (req,res)=>{
@@ -1690,7 +2042,8 @@ app.post('/api/query/brand', requireAuth, async (req,res)=>{
       return brandQuery(rows,periods,req.body.filters||{},n,req.body.metricMode);
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.post('/api/query/items', requireAuth, async (req,res)=>{
@@ -1702,7 +2055,38 @@ app.post('/api/query/items', requireAuth, async (req,res)=>{
       return itemQuery(rows,periods,req.body.filters||{},n,req.body.metricMode);
     });
     res.json(result);
-  } catch(e){res.status(400).json({error:e.message});}
+  }
+  catch(e){ res.status(400).json({error:e.message}); }
+});
+
+
+app.get('/api/admin/auto-sync/status', requireAdmin, (req,res)=>{
+  res.json(publicAutoSyncStatus());
+});
+
+app.post('/api/admin/auto-sync/run', requireAdmin, async (req,res)=>{
+  try{
+    const result=await runMetabaseAutoSync(`admin:${req.user.username}`);
+    res.json(result);
+  }catch(e){
+    res.status(e.statusCode||500).json({error:e.message});
+  }
+});
+
+// External scheduler endpoint. Protected by AUTO_SYNC_SECRET.
+// GitHub Actions calls this endpoint four times per day.
+app.post('/api/automation/sales-sync', async (req,res)=>{
+  const configured=metabaseSettings();
+  const provided=bearerSecret(req);
+  if(!configured.triggerSecret || !secretsEqual(provided,configured.triggerSecret)){
+    return res.status(401).json({error:'INVALID_AUTO_SYNC_SECRET'});
+  }
+  try{
+    const result=await runMetabaseAutoSync('github-actions');
+    res.json(result);
+  }catch(e){
+    res.status(e.statusCode||500).json({error:e.message});
+  }
 });
 
 app.get('/api/admin/upload-policy', requireAdmin, (req,res)=>res.json(uploadPolicy()));
@@ -1716,6 +2100,12 @@ const upload = multer({
 
 app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,res)=>{
   if (!req.file) return res.status(400).json({error:'FILE_REQUIRED'});
+  if(dataWriteBusy){
+    await fsp.unlink(req.file.path).catch(()=>{});
+    return res.status(409).json({error:`DATA_WRITE_BUSY${dataWriteOwner?`: ${dataWriteOwner}`:''}`});
+  }
+  dataWriteBusy=true;
+  dataWriteOwner=`manual-upload:${req.user.username}`;
   try {
     const targetMonth=String(req.body.targetMonth||'').trim();
     if (!monthAllowed(targetMonth)) throw new Error(`TARGET_MONTH_INVALID. Choose ${STORAGE_START_MONTH} through ${STORAGE_END_MONTH}.`);
@@ -1802,6 +2192,8 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
   } catch(e) {
     res.status(e.statusCode||400).json({error:e.message});
   } finally {
+    dataWriteBusy=false;
+    dataWriteOwner=null;
     fsp.unlink(req.file.path).catch(()=>{});
   }
 });
@@ -1928,4 +2320,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue: 1 + result cache: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync: enabled | Monthly closing: disabled`)));

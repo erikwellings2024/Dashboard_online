@@ -1,0 +1,184 @@
+SALES DASHBOARD — METABASE AUTO UPDATE SALES v27
+===================================================
+
+FINAL RULE
+----------
+Auto Update Sales runs 4 times/day:
+- 00:00 WIB
+- 06:00 WIB
+- 12:00 WIB
+- 18:00 WIB
+
+Date rule:
+- start_date = tanggal 1 bulan berjalan
+- end_date   = tanggal hari ini
+- timezone   = Asia/Jakarta
+
+Example:
+13 Sep 2026:
+  start_date = 2026-09-01
+  end_date   = 2026-09-13
+  target     = folder 2026-09
+
+Every run REPLACES the current month's data. It does not append duplicates.
+
+
+A. DEPLOY V27
+------------
+Replace these files in GitHub:
+
+ROOT:
+- server.js
+
+/public:
+- dashboard.js
+- dashboard.html
+- admin.js
+- admin.html
+- app.css
+
+Also add:
+.github/workflows/auto-sales-sync.yml
+
+Suggested commit:
+Add Metabase auto sales sync v27
+
+
+B. RAILWAY VARIABLES
+--------------------
+Railway > Dashboard_online > Variables > New Variable
+
+Add:
+
+METABASE_URL=https://wrpt.rcloud.id
+METABASE_USERNAME=<your Metabase email>
+METABASE_PASSWORD=<your Metabase password>
+METABASE_QUESTION_ID=364
+AUTO_SYNC_SECRET=<a long random secret>
+
+Optional; the defaults already match your current Question 364:
+METABASE_START_PARAM_ID=686090f7-5f68-4cbf-bd75-b10ef09f4781
+METABASE_END_PARAM_ID=8d7c1ee3-44a3-45e3-b056-dfb1fc99ca76
+
+Keep the existing Railway variables:
+MAX_UPLOAD_MB=250
+NODE_OPTIONS=--max-old-space-size=768
+QUERY_CONCURRENCY=1          (optional; v27 defaults to 1)
+QUERY_CACHE_TTL_MS=60000     (optional; v27 defaults to 60 sec)
+
+IMPORTANT:
+Never put METABASE_PASSWORD or AUTO_SYNC_SECRET in GitHub source code.
+
+
+C. TEST RUN NOW FIRST
+---------------------
+After Railway deployment is ACTIVE:
+
+1. Open Dashboard.
+2. Login as Admin.
+3. Open Admin Settings.
+4. Open "Auto Update Sales".
+5. Configuration must show READY.
+6. Click RUN NOW.
+7. Confirm.
+
+Expected:
+- Metabase login succeeds.
+- XLSX Question 364 downloads temporarily.
+- XLSX is parsed with the same monthly parser used by manual upload.
+- YYYY/MM.json.gz is replaced.
+- Temporary XLSX is deleted.
+- Auto Sync status becomes SUCCESS.
+- Monthly Data Folder shows source:
+  "Metabase Q364 YYYY-MM-01 to YYYY-MM-DD.xlsx"
+
+Do not enable GitHub scheduling until RUN NOW succeeds.
+
+
+D. GITHUB ACTIONS SECRETS
+-------------------------
+Open GitHub repository Dashboard_online:
+
+Settings
+> Secrets and variables
+> Actions
+> New repository secret
+
+Create:
+
+1. DASHBOARD_SYNC_URL
+
+Value:
+https://dashboard-online-wellings.up.railway.app/api/automation/sales-sync
+
+2. AUTO_SYNC_SECRET
+
+Value:
+Use EXACTLY the same AUTO_SYNC_SECRET that you put in Railway.
+
+
+E. TEST GITHUB MANUALLY
+-----------------------
+GitHub:
+Actions
+> Auto Sales Sync
+> Run workflow
+> Run workflow
+
+Wait until it is green.
+
+Then open:
+Admin Settings > Auto Update Sales
+
+Check:
+- Last Result = SUCCESS
+- Trigger = github-actions
+- Last Run updated
+- Data Range correct
+
+
+F. SCHEDULE
+-----------
+The workflow uses UTC because it is the most compatible GitHub Actions schedule.
+
+Cron:
+0 5,11,17,23 * * *
+
+Conversion:
+05:00 UTC = 12:00 WIB
+11:00 UTC = 18:00 WIB
+17:00 UTC = 00:00 WIB (Jakarta next date)
+23:00 UTC = 06:00 WIB (Jakarta next date)
+
+The server itself always calculates the report date using Asia/Jakarta.
+So the 00:00 run uses the correct Jakarta date.
+
+
+G. SAFETY / MEMORY
+------------------
+v27 keeps the previous protections:
+- monthly gzip storage
+- no full-history RAM cache
+- only one heavy dashboard query at a time by default
+- short result cache for multiple users
+- dashboard sections initially load sequentially
+- manual upload and Auto Sync cannot write sales data simultaneously
+- duplicate scheduler runs are blocked
+
+
+H. METABASE ENDPOINTS USED
+--------------------------
+Login:
+POST https://wrpt.rcloud.id/api/session
+
+Download:
+POST https://wrpt.rcloud.id/api/card/364/query/xlsx
+
+Question parameters:
+start_date:
+686090f7-5f68-4cbf-bd75-b10ef09f4781
+
+end_date:
+8d7c1ee3-44a3-45e3-b056-dfb1fc99ca76
+
+Credentials are read only from Railway environment variables.

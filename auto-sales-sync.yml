@@ -1,0 +1,48 @@
+name: Auto Sales Sync
+
+on:
+  schedule:
+    # GitHub cron uses UTC.
+    # 05:00 UTC = 12:00 WIB
+    # 11:00 UTC = 18:00 WIB
+    # 17:00 UTC = 00:00 WIB (next Jakarta date)
+    # 23:00 UTC = 06:00 WIB (next Jakarta date)
+    - cron: '0 5,11,17,23 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sales-auto-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-sales:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Trigger Sales Sync
+        shell: bash
+        env:
+          DASHBOARD_SYNC_URL: ${{ secrets.DASHBOARD_SYNC_URL }}
+          AUTO_SYNC_SECRET: ${{ secrets.AUTO_SYNC_SECRET }}
+        run: |
+          set -euo pipefail
+
+          echo "Triggering Sales Dashboard Auto Sync..."
+          echo "Current UTC: $(date -u '+%Y-%m-%d %H:%M:%S')"
+
+          response_file="$(mktemp)"
+          http_code="$(
+            curl               --silent               --show-error               --location               --retry 2               --retry-delay 15               --max-time 600               --output "$response_file"               --write-out "%{http_code}"               --request POST               --header "Authorization: Bearer ${AUTO_SYNC_SECRET}"               --header "Content-Type: application/json"               --data '{}'               "${DASHBOARD_SYNC_URL}"
+          )"
+
+          cat "$response_file"
+          echo
+          echo "HTTP status: $http_code"
+
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "Auto Sync failed."
+            exit 1
+          fi
+
+          echo "Auto Sync completed successfully."
