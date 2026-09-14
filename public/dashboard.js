@@ -80,6 +80,7 @@ S.categoryTarget={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEs
 S.store={periods:clone(p),prevCount:2,metricMode:'value',product:'',productLabel:'',filters:{pts:['EFM','EFIT','ESB'],stores:clone(common.stores),channels:clone(common.channels),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
 function rangeControl(section,key,label,period){
@@ -184,6 +185,17 @@ function activeFilterChips(section){
     chips+=activeProductChip(s);
   }
 
+  if(section==='daily'){
+    chips+=activeMultiChip('Channel',s.filters.channels,META.channels);
+    chips+=activeMultiChip('Store',s.filters.stores,META.stores);
+    chips+=activeMultiChip('Category',s.filters.categories,META.categories);
+    chips+=activeMultiChip('Brand',s.filters.brands,META.brands);
+    chips+=activeMultiChip('Sales Type',s.filters.salesTypes,META.salesTypes);
+    chips+=activeMultiChip('Customer Type',s.filters.customerTypes,META.customerTypes||[]);
+    chips+=activeMultiChip('Store Stat',s.filters.storeStats,META.storeStats||[]);
+    chips+=activeProductChip(s);
+  }
+
   return chips;
 }
 
@@ -200,13 +212,16 @@ function renderFilters(){
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
-  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${rangeControl('store','p1','Previous 1',st.periods[1])}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 3 only</b></span>${activeFilterChips('store')}</div>`;
+  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${rangeControl('store','p1','Previous 1',st.periods[1])}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${activeFilterChips('store')}</div>`;
 
   const b=S.brand;
-  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${rangeControl('brand','p1','Previous 1',b.periods[1])}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${activeFilterChips('brand')}</div>`;
+  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${rangeControl('brand','p1','Previous 1',b.periods[1])}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('brand')}</div>`;
 
   const it=S.item;
-  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('item')}</div>`;
+  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
+
+  const dy=S.daily;
+  $('#dailyFilters').innerHTML=`<div class="filter-grid">${rangeControl('daily','period','Current Period',dy.period)}${multiControl('daily','channels','Channel',META.channels,dy.filters.channels,true)}${multiControl('daily','stores','Store',META.stores,dy.filters.stores,true)}${multiControl('daily','categories','Category',META.categories,dy.filters.categories,true)}${multiControl('daily','brands','Brand',META.brands,dy.filters.brands,true)}${multiControl('daily','salesTypes','Sales Type',META.salesTypes,dy.filters.salesTypes)}${multiControl('daily','customerTypes','Customer Type',META.customerTypes||[],dy.filters.customerTypes)}${multiControl('daily','storeStats','Store Stat',META.storeStats||[],dy.filters.storeStats)}${productPicker('daily','Item (SKU / Name)')}<button class="apply" data-apply="daily">APPLY</button></div><div class="chips"><span class="chip"><b>Section 7 only</b></span>${activeFilterChips('daily')}</div>`;
 
   bindFilters();
 }
@@ -506,7 +521,8 @@ if(sec==='categoryTarget'){showLoad('#categoryTargetTable');const d=await api('/
 if(sec==='store'){showLoad('#storeTable');const filters=reqFilters('store');filters.product=S.store.product;const d=await api('/api/query/store',{method:'POST',body:JSON.stringify({periods:periodsFor('store'),filters,metricMode:S.store.metricMode})});renderStore(d)}
 if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{method:'POST',body:JSON.stringify({periods:periodsFor('brand'),filters:reqFilters('brand'),topN:S.brand.topN,metricMode:S.brand.metricMode})});renderBrand(d)}
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
-}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable'}[sec];$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+if(sec==='daily'){showLoad('#dailyTable');const filters=reqFilters('daily');filters.product=S.daily.product;const d=await api('/api/query/daily-trend',{method:'POST',body:JSON.stringify({period:S.daily.period,filters,metricMode:S.daily.metricMode})});renderDailyTrend(d)}
+}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
 
@@ -680,6 +696,44 @@ function renderItems(d){
   const ps=periodsFor('item'),mode=d.metricMode||S.item.metricMode,label=mode==='qty'?'Qty':'Value';
   $('#itemTable').innerHTML=`<div class="rank-grid">${itemTable(`Highest Sales Growth by ${label}`,'up',d.topGrowth,d.totalAll,ps,mode)}${itemTable(`Highest Sales Decline by ${label}`,'down',d.topDecline,d.totalAll,ps,mode)}</div>`;
   $$('#itemTable table').forEach(enhanceTable);
+}
+
+function fmtDaily(v,mode){
+  const n=Number(v);
+  if(!Number.isFinite(n))return '-';
+  if(mode==='qty'){
+    return n.toLocaleString('en-US',{
+      minimumFractionDigits:Number.isInteger(n)?0:1,
+      maximumFractionDigits:1
+    });
+  }
+  return Math.round(n).toLocaleString('en-US');
+}
+
+function dailyDateLabel(iso){
+  return parseISO(iso).toLocaleDateString('en-US',{
+    month:'long',day:'numeric',year:'numeric'
+  });
+}
+
+function renderDailyTrend(d){
+  const mode=d.metricMode||S.daily.metricMode;
+  const channels=d.channels||[];
+  const chartCols=channels.map((_,i)=>i+1).join(',');
+  const chartSeries=channels.join(',');
+
+  let h=`<table class="sortable-table chart-table daily-trend-table" data-chart-label="0" data-chart-cols="${esc(chartCols)}" data-chart-series="${esc(chartSeries)}"><thead><tr><th>transaction_date</th>${channels.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Grand Total</th></tr></thead><tbody>`;
+
+  for(const r of d.rows||[]){
+    h+=`<tr><td>${esc(dailyDateLabel(r.date))}</td>${channels.map(c=>`<td class="num">${fmtDaily(r.values?.[c]||0,mode)}</td>`).join('')}<td class="num">${fmtDaily(r.total||0,mode)}</td></tr>`;
+  }
+
+  h+=`<tr class="daily-grand-total no-sort-row"><td>Grand Total</td>${channels.map(c=>`<td class="num">${fmtDaily(d.totals?.[c]||0,mode)}</td>`).join('')}<td class="num">${fmtDaily(d.grandTotal||0,mode)}</td></tr>`;
+  h+=`<tr class="daily-average no-sort-row"><td>Average / Day</td>${channels.map(c=>`<td class="num">${fmtDaily(d.averages?.[c]||0,mode)}</td>`).join('')}<td class="num">${fmtDaily(d.averageGrandTotal||0,mode)}</td></tr>`;
+  h+='</tbody></table>';
+
+  $('#dailyTable').innerHTML=h;
+  enhanceTable($('#dailyTable table'));
 }
 
 
@@ -1155,6 +1209,6 @@ async function refreshSchedulerIndicator(){
 }
 
 
-async function boot(){ME=await api('/api/auth/me');$('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;if(ME.role==='admin')$('#adminLink').classList.remove('hidden');META=await api('/api/meta');setUpdateChipState('auto-ok',normalUpdateHeaderText());$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);initState();renderFilters();await refreshSchedulerIndicator();for(const sec of ['channel','target','categoryTarget','store','brand','item'])await loadSection(sec);setInterval(refreshSchedulerIndicator,60000)}
+async function boot(){ME=await api('/api/auth/me');$('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;if(ME.role==='admin')$('#adminLink').classList.remove('hidden');META=await api('/api/meta');setUpdateChipState('auto-ok',normalUpdateHeaderText());$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);initState();renderFilters();await refreshSchedulerIndicator();for(const sec of ['channel','target','categoryTarget','store','brand','item','daily'])await loadSection(sec);setInterval(refreshSchedulerIndicator,60000)}
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
 boot().catch(e=>{console.error(e);location.href='/login.html'});

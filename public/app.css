@@ -794,3 +794,52 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 @media(max-width:1250px){
   .update-chip{max-width:520px;font-size:12px!important}
 }
+
+
+/* v34 — Section 7 Daily Trend */
+#dailySection .title-line{
+  align-items:center;
+}
+
+#dailyTable .daily-trend-table{
+  width:100%;
+  table-layout:auto;
+}
+
+#dailyTable .daily-trend-table th{
+  background:#bfe3f2;
+  font-weight:700;
+  text-align:center;
+  white-space:nowrap;
+}
+
+#dailyTable .daily-trend-table th:first-child,
+#dailyTable .daily-trend-table td:first-child{
+  min-width:165px;
+}
+
+#dailyTable .daily-trend-table td:not(:first-child),
+#dailyTable .daily-trend-table th:not(:first-child){
+  min-width:105px;
+}
+
+#dailyTable .daily-grand-total td{
+  background:#bfe3f2 !important;
+  font-weight:700;
+  border-top:2px solid #1ca0cf;
+}
+
+#dailyTable .daily-average td{
+  background:#bff3c8 !important;
+  font-weight:700;
+  border-top:2px solid #43b76a;
+}
+
+#dailyTable .daily-grand-total td:first-child,
+#dailyTable .daily-average td:first-child{
+  font-size:13px;
+}
+
+#dailyTable .daily-trend-table tbody tr:not(.daily-grand-total):not(.daily-average):hover td{
+  background:#f8fbfd;
+}
