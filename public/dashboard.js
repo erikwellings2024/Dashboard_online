@@ -1045,53 +1045,6 @@ $$('.chart-btn').forEach(b=>b.onclick=()=>createChart(b.closest('.section')));
 function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')).slice(0,15);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>r.cells[labelCol]?.textContent||''),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
 
 
-function jakartaDateParts(date=new Date()){
-  const parts=new Intl.DateTimeFormat('en-CA',{
-    timeZone:'Asia/Jakarta',
-    year:'numeric',month:'2-digit',day:'2-digit',
-    hour:'2-digit',minute:'2-digit',second:'2-digit',
-    hourCycle:'h23'
-  }).formatToParts(date);
-  const o={};
-  for(const p of parts){
-    if(p.type!=='literal')o[p.type]=p.value;
-  }
-  return {
-    year:Number(o.year),month:Number(o.month),day:Number(o.day),
-    hour:Number(o.hour),minute:Number(o.minute),second:Number(o.second)
-  };
-}
-
-function latestExpectedSchedulerSlot(now=new Date()){
-  const p=jakartaDateParts(now);
-  const y=String(p.year).padStart(4,'0');
-  const m=String(p.month).padStart(2,'0');
-  const d=String(p.day).padStart(2,'0');
-  const startToday=new Date(`${y}-${m}-${d}T00:00:00+07:00`);
-  const schedule=[0,6,12,18];
-  let hour=null;
-  for(const h of schedule){
-    if(h<=p.hour)hour=h;
-  }
-  if(hour===null){
-    return {date:new Date(startToday.getTime()-6*60*60*1000),label:'18:00'};
-  }
-  return {
-    date:new Date(startToday.getTime()+hour*60*60*1000),
-    label:`${String(hour).padStart(2,'0')}:00`
-  };
-}
-
-function formatWibTime(value){
-  if(!value)return '-';
-  const d=new Date(value);
-  if(Number.isNaN(d.getTime()))return '-';
-  return d.toLocaleTimeString('id-ID',{
-    timeZone:'Asia/Jakarta',
-    hour:'2-digit',minute:'2-digit',hour12:false
-  }).replace('.',':');
-}
-
 function normalUpdateHeaderText(){
   const rawDate=META?.maxDate?parseISO(META.maxDate):null;
   if(!rawDate)return 'NO RAW DATA';
@@ -1103,112 +1056,68 @@ function normalUpdateHeaderText(){
       }).replace('.',':')
     :'--:--';
 
-  const mode=META.runtime?.lastUpload?.mode;
-  const source=mode==='metabase_auto_sync'?'auto update':'manual update';
+  const upload=META.runtime?.lastUpload||{};
+  let source='manual update';
+
+  if(upload.mode==='metabase_auto_sync'){
+    source=String(upload.trigger||'').startsWith('admin:')
+      ?'Run Now'
+      :'Metabase update';
+  }else if(upload.mode==='monthly_replace'){
+    source='manual upload';
+  }
 
   return `Update Sales Data ${rawDate.toLocaleDateString('id-ID',{
     day:'numeric',month:'short',year:'numeric'
   })} pk ${updateTime} (by ${source})`;
 }
 
-function setUpdateChipState(kind,text,title=''){
+function renderUpdateHeader(){
   const el=$('#updatedAt');
   if(!el)return;
-  el.classList.remove('auto-ok','auto-running','auto-late','auto-failed','auto-not-configured');
-  el.classList.add(kind);
-  el.textContent=text;
-  el.title=title||text;
+  el.classList.remove('auto-running','auto-late','auto-failed','auto-not-configured');
+  el.classList.add('auto-ok');
+  el.textContent=normalUpdateHeaderText();
+  el.title='Status update data terakhir';
 }
 
-function renderSchedulerIndicator(health){
-  const normal=normalUpdateHeaderText();
-
-  if(!health){
-    setUpdateChipState('auto-ok',normal);
-    return;
-  }
-
-  if(!health.configured){
-    setUpdateChipState(
-      'auto-not-configured',
-      '⚠ AUTO UPDATE NOT CONFIGURED — '+normal,
-      'Auto Update Sales belum lengkap konfigurasinya.'
-    );
-    return;
-  }
-
-  const now=new Date();
-  const slot=latestExpectedSchedulerSlot(now);
-  const graceMs=Number(health.graceMinutes||10)*60*1000;
-  const successAt=health.lastSchedulerSuccessAt?new Date(health.lastSchedulerSuccessAt):null;
-  const attemptAt=health.lastSchedulerAttemptAt?new Date(health.lastSchedulerAttemptAt):null;
-
-  const successForSlot=
-    successAt && !Number.isNaN(successAt.getTime()) &&
-    successAt.getTime()>=slot.date.getTime();
-
-  const attemptForSlot=
-    attemptAt && !Number.isNaN(attemptAt.getTime()) &&
-    attemptAt.getTime()>=slot.date.getTime();
-
-  if(health.running && health.lastTrigger==='github-actions' && attemptForSlot){
-    setUpdateChipState(
-      'auto-running',
-      `AUTO UPDATE RUNNING — jadwal ${slot.label} WIB`,
-      `Scheduler sedang menjalankan Auto Update Sales. ${normal}`
-    );
-    return;
-  }
-
-  if(
-    health.lastSchedulerResult==='FAILED' &&
-    attemptForSlot &&
-    !successForSlot
-  ){
-    const lastSuccess=formatWibTime(health.lastSchedulerSuccessAt);
-    setUpdateChipState(
-      'auto-failed',
-      `⚠ AUTO UPDATE FAILED ${formatWibTime(health.lastSchedulerAttemptAt)} — last success ${lastSuccess}`,
-      health.lastSchedulerError
-        ? `Error: ${health.lastSchedulerError}`
-        : `Scheduler ${slot.label} WIB gagal.`
-    );
-    return;
-  }
-
-  if(now.getTime()>slot.date.getTime()+graceMs && !successForSlot){
-    const lastSuccess=formatWibTime(health.lastSchedulerSuccessAt);
-    setUpdateChipState(
-      'auto-late',
-      `⚠ AUTO UPDATE TERLAMBAT — jadwal ${slot.label} WIB belum berhasil • last success ${lastSuccess}`,
-      `Tidak ada Auto Sync GitHub Actions yang sukses untuk jadwal ${slot.label} WIB setelah toleransi ${health.graceMinutes||10} menit.`
-    );
-    return;
-  }
-
-  setUpdateChipState('auto-ok',normal);
-}
-
-async function refreshSchedulerIndicator(){
+async function refreshUpdateHeader(){
   try{
-    const health=await api('/api/auto-sync/health');
+    const fresh=await api('/api/meta');
+    const before=META?.runtime?.updatedAt||'';
+    const after=fresh?.runtime?.updatedAt||'';
 
-    // When a scheduler succeeds while this dashboard tab is already open,
-    // refresh light metadata so the displayed update time/date also changes.
-    const currentUpdated=META?.runtime?.updatedAt?Date.parse(META.runtime.updatedAt):0;
-    const latestSuccess=health?.lastSuccessAt?Date.parse(health.lastSuccessAt):0;
-    if(latestSuccess && latestSuccess>currentUpdated+1000){
-      META=await api('/api/meta');
+    META=fresh;
+    renderUpdateHeader();
+
+    if(after && before && after!==before){
+      console.log(`[DASHBOARD] data update detected ${before} -> ${after}`);
     }
-
-    renderSchedulerIndicator(health);
   }catch(e){
-    // A monitoring failure must not break dashboard tables.
-    setUpdateChipState('auto-ok',normalUpdateHeaderText());
+    console.warn('[DASHBOARD] update header refresh failed:',e.message);
   }
 }
 
 
-async function boot(){ME=await api('/api/auth/me');$('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;if(ME.role==='admin')$('#adminLink').classList.remove('hidden');META=await api('/api/meta');setUpdateChipState('auto-ok',normalUpdateHeaderText());$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);initState();renderFilters();await refreshSchedulerIndicator();for(const sec of ['channel','target','categoryTarget','store','brand','item','daily'])await loadSection(sec);setInterval(refreshSchedulerIndicator,60000)}
+async function boot(){
+  ME=await api('/api/auth/me');
+  $('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;
+  if(ME.role==='admin')$('#adminLink').classList.remove('hidden');
+
+  META=await api('/api/meta');
+  renderUpdateHeader();
+  $('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);
+
+  initState();
+  renderFilters();
+
+  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily']){
+    await loadSection(sec);
+  }
+
+  // If RUN NOW is used from another tab, refresh only the latest-update
+  // metadata/header every minute. Filters/tables are left untouched.
+  setInterval(refreshUpdateHeader,60000);
+}
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
 boot().catch(e=>{console.error(e);location.href='/login.html'});

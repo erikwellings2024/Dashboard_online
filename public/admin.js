@@ -124,7 +124,7 @@ async function loadAutoSyncStatus(){
   $('#autoSyncConfigured').textContent=s.configured?'READY':'NOT CONFIGURED';
   $('#autoSyncConfigured').className=s.configured?'status-ok':'status-bad';
   $('#autoSyncSource').textContent=`${s.source||'Metabase'}${s.metabaseHost?' • '+s.metabaseHost:''}`;
-  $('#autoSyncSchedule').textContent=s.schedule||'00:00 • 06:00 • 12:00 • 18:00 WIB';
+  $('#autoSyncSchedule').textContent=s.schedule||'Manual • RUN NOW';
   $('#autoSyncDateRule').textContent=s.dateRule||'Tanggal 1 bulan berjalan → tanggal hari ini';
   $('#autoSyncResult').textContent=s.running?'RUNNING':(s.lastResult||'-');
   $('#autoSyncResult').className=s.running?'status-running':s.lastResult==='SUCCESS'?'status-ok':s.lastResult==='FAILED'?'status-bad':'';
@@ -132,7 +132,10 @@ async function loadAutoSyncStatus(){
   $('#autoSyncRange').textContent=s.lastStartDate&&s.lastEndDate?`${s.lastStartDate} → ${s.lastEndDate}`:'-';
   $('#autoSyncRows').textContent=s.lastRows==null?'-':Number(s.lastRows).toLocaleString('id-ID');
   $('#autoSyncDuration').textContent=syncDuration(s.lastDurationMs);
-  $('#autoSyncTrigger').textContent=s.lastTrigger||'-';
+  const trig=String(s.lastTrigger||'');
+  $('#autoSyncTrigger').textContent=trig.startsWith('admin:')
+    ?`RUN NOW • ${trig.slice(6)}`
+    :(trig||'-');
   $('#runAutoSync').disabled=!s.configured||s.running;
 
   const err=$('#autoSyncError');
@@ -151,10 +154,10 @@ $('#refreshAutoSync').onclick=async()=>{
 };
 $('#runAutoSync').onclick=async()=>{
   const b=$('#runAutoSync');
-  if(!confirm('Run Auto Update Sales sekarang? Data bulan berjalan akan di-replace dari Metabase tanggal 1 sampai hari ini.'))return;
+  if(!confirm('Jalankan Update Sales dari Metabase sekarang? Data bulan berjalan akan di-replace dari tanggal 1 sampai hari ini.'))return;
   try{
     b.disabled=true;b.textContent='SYNCING...';
-    msg('#autoSyncMsg','Auto Sync sedang berjalan. Jangan upload manual sampai proses selesai.');
+    msg('#autoSyncMsg','Update Metabase sedang berjalan. Jangan upload manual sampai proses selesai.');
     const r=await api('/api/admin/auto-sync/run',{method:'POST',body:'{}'});
     msg('#autoSyncMsg',`SUCCESS • ${r.startDate} → ${r.endDate} • ${Number(r.rows||0).toLocaleString('id-ID')} rows`);
     META=await api('/api/meta');
