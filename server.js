@@ -1264,6 +1264,69 @@ function channelQuery(sourceRows, periods, filters) {
   return { rows, total, telemed, telemedPct, variance };
 }
 
+
+function isoDatesInclusive(start,end){
+  const out=[];
+  let d=new Date(`${start}T00:00:00Z`);
+  const last=new Date(`${end}T00:00:00Z`);
+  while(d<=last){
+    out.push(d.toISOString().slice(0,10));
+    d=new Date(d.getTime()+86400000);
+  }
+  return out;
+}
+
+function dailyTrendQuery(sourceRows,period,filters,metricMode='value'){
+  const mode=metricMode==='qty'?'qty':'value';
+  const requestedChannels=arr(filters.channels).map(x=>x.toUpperCase());
+  const channels=activeChannels()
+    .filter(c=>!requestedChannels.length || requestedChannels.includes(String(c.name).toUpperCase()))
+    .map(c=>c.name);
+
+  const allowedChannels=new Set(channels.map(x=>String(x).toUpperCase()));
+  const base=filterBase(sourceRows,filters)
+    .filter(r=>rowInPeriod(r,period))
+    .filter(r=>allowedChannels.has(String(r.channel).toUpperCase()));
+
+  const dates=isoDatesInclusive(period.start,period.end);
+  const byDate=new Map();
+  for(const date of dates){
+    const values={};
+    for(const c of channels)values[c]=0;
+    byDate.set(date,{date,values,total:0});
+  }
+
+  const totals={};
+  for(const c of channels)totals[c]=0;
+  let grandTotal=0;
+
+  for(const r of base){
+    const rec=byDate.get(r.date);
+    if(!rec)continue;
+    const value=mode==='qty'?safeNum(r.qty):safeNum(r.sales);
+    rec.values[r.channel]=(rec.values[r.channel]||0)+value;
+    rec.total+=value;
+    totals[r.channel]=(totals[r.channel]||0)+value;
+    grandTotal+=value;
+  }
+
+  const dayCount=Math.max(1,dates.length);
+  const averages={};
+  for(const c of channels)averages[c]=safeNum(totals[c])/dayCount;
+
+  return {
+    period,
+    metricMode:mode,
+    channels,
+    rows:dates.map(d=>byDate.get(d)),
+    totals,
+    grandTotal,
+    averages,
+    averageGrandTotal:grandTotal/dayCount,
+    dayCount
+  };
+}
+
 function targetQuery(sourceRows, period, filters, daysTotalBestEstimate) {
   const base = filterBase(sourceRows,filters).filter(r => rowInPeriod(r,period));
   const key = monthKey(period.end);
@@ -2580,6 +2643,25 @@ app.post('/api/query/items', requireAuth, async (req,res)=>{
 });
 
 
+app.post('/api/query/daily-trend', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('daily-trend',req.body,async()=>{
+      const period=normalizePeriods([req.body.period])[0];
+      const rows=await readRowsForPeriods([period]);
+      return dailyTrendQuery(
+        rows,
+        period,
+        req.body.filters||{},
+        req.body.metricMode
+      );
+    });
+    res.json(result);
+  }catch(e){
+    res.status(400).json({error:e.message});
+  }
+});
+
+
 app.get('/api/admin/auto-sync/status', requireAdmin, (req,res)=>{
   res.json(publicAutoSyncStatus());
 });
@@ -2840,4 +2922,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend: enabled | Monthly closing: disabled`)));
