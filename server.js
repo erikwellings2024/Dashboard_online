@@ -142,7 +142,7 @@ let monthIndex = {};
 let autoSyncStatus = {
   running:false,
   configured:false,
-  schedule:'00:00, 06:00, 12:00, 18:00 WIB',
+  schedule:'Manual — Admin RUN NOW',
   timezone:'Asia/Jakarta',
   dateRule:'1st of current month → today',
   lastAttemptAt:null,
@@ -161,6 +161,9 @@ let autoSyncStatus = {
   lastSchedulerResult:null,
   lastSchedulerError:null,
   lastSchedulerDurationMs:null,
+  lastSchedulerSlotAttempt:null,
+  lastSchedulerSlotSuccess:null,
+  lastSchedulerSource:null,
   lastAuthMode:null
 };
 let metabaseSessionMemory=null;
@@ -1663,7 +1666,73 @@ function metabaseSettings(){
 
 function autoSyncConfigured(){
   const s=metabaseSettings();
-  return !!(s.baseUrl && s.username && s.password && s.questionId && s.triggerSecret);
+  // V36: manual-only Metabase update from authenticated Admin RUN NOW.
+  return !!(s.baseUrl && s.username && s.password && s.questionId);
+}
+
+
+function isSchedulerTrigger(trigger){
+  return ['github-actions','github-backup','cron-primary','external-scheduler'].includes(String(trigger||''));
+}
+
+function jakartaDateTimeParts(date=new Date()){
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Asia/Jakarta',
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',
+    hourCycle:'h23'
+  }).formatToParts(date).reduce((a,p)=>{
+    if(p.type!=='literal')a[p.type]=p.value;
+    return a;
+  },{});
+  return {
+    year:Number(parts.year),
+    month:Number(parts.month),
+    day:Number(parts.day),
+    hour:Number(parts.hour),
+    minute:Number(parts.minute),
+    second:Number(parts.second),
+    isoDate:`${parts.year}-${parts.month}-${parts.day}`
+  };
+}
+
+function currentSchedulerSlot(date=new Date()){
+  const p=jakartaDateTimeParts(date);
+  const slots=[0,6,12,18];
+  let hour=18;
+  let slotDate=p.isoDate;
+
+  const eligible=slots.filter(h=>h<=p.hour);
+  if(eligible.length){
+    hour=eligible[eligible.length-1];
+  }else{
+    // Only theoretical for malformed formatter output. Keep safe fallback.
+    hour=0;
+  }
+
+  const hh=String(hour).padStart(2,'0');
+  return {
+    key:`${slotDate}@${hh}:00`,
+    date:slotDate,
+    hour,
+    label:`${hh}:00 WIB`
+  };
+}
+
+function normalizedSchedulerSource(req){
+  const raw=String(
+    req.headers['x-scheduler-source'] ||
+    req.body?.source ||
+    ''
+  ).trim().toLowerCase();
+
+  if(raw==='cron-primary')return 'cron-primary';
+  if(raw==='github-backup')return 'github-backup';
+
+  // Backward compatibility with the previous workflow.
+  if(raw==='github-actions')return 'github-actions';
+
+  return 'external-scheduler';
 }
 
 function publicAutoSyncStatus(){
@@ -1674,7 +1743,7 @@ function publicAutoSyncStatus(){
     configured:autoSyncConfigured(),
     source:s.questionId?`Metabase Question ${s.questionId} • CSV Streaming`:'Metabase • CSV Streaming',
     metabaseHost:(()=>{try{return new URL(s.baseUrl).host}catch{return ''}})(),
-    schedule:'00:00, 06:00, 12:00, 18:00 WIB',
+    schedule:'Manual — Admin RUN NOW',
     timezone:'Asia/Jakarta',
     dateRule:'Tanggal 1 bulan berjalan → tanggal hari ini',
     sessionReuse:{
@@ -2306,7 +2375,7 @@ async function finalizeAutomatedMonthReplace(targetMonth,sourceFile,fileSize,str
   return {entry,coverage,replacedRows};
 }
 
-async function runMetabaseAutoSync(trigger='scheduler'){
+async function runMetabaseAutoSync(trigger='scheduler', schedulerSlotKey=null){
   if(autoSyncStatus.running) {
     const e=new Error('AUTO_SYNC_ALREADY_RUNNING');
     e.statusCode=409;
@@ -2332,6 +2401,11 @@ async function runMetabaseAutoSync(trigger='scheduler'){
     throw e;
   }
 
+  const schedulerTrigger=isSchedulerTrigger(trigger);
+  const schedulerSlot=schedulerTrigger
+    ? (schedulerSlotKey || currentSchedulerSlot().key)
+    : null;
+
   const started=Date.now();
   const attemptAt=new Date().toISOString();
   autoSyncStatus={
@@ -2345,10 +2419,12 @@ async function runMetabaseAutoSync(trigger='scheduler'){
     lastEndDate:range.endDate,
     lastTargetMonth:range.targetMonth,
     lastTrigger:trigger,
-    ...(trigger==='github-actions'?{
+    ...(schedulerTrigger?{
       lastSchedulerAttemptAt:attemptAt,
       lastSchedulerResult:'RUNNING',
-      lastSchedulerError:null
+      lastSchedulerError:null,
+      lastSchedulerSlotAttempt:schedulerSlot,
+      lastSchedulerSource:trigger
     }:{})
   };
   dataWriteBusy=true;
@@ -2390,11 +2466,13 @@ async function runMetabaseAutoSync(trigger='scheduler'){
       lastTrigger:trigger,
       lastSourceFile:sourceFile,
       lastAuthMode:authMode,
-      ...(trigger==='github-actions'?{
+      ...(schedulerTrigger?{
         lastSchedulerSuccessAt:new Date().toISOString(),
         lastSchedulerResult:'SUCCESS',
         lastSchedulerError:null,
-        lastSchedulerDurationMs:durationMs
+        lastSchedulerDurationMs:durationMs,
+        lastSchedulerSlotSuccess:schedulerSlot,
+        lastSchedulerSource:trigger
       }:{})
     };
     await persistAutoSyncStatus();
@@ -2423,10 +2501,12 @@ async function runMetabaseAutoSync(trigger='scheduler'){
       lastError:String(e.message||e).slice(0,800),
       lastDurationMs:Date.now()-started,
       lastTrigger:trigger,
-      ...(trigger==='github-actions'?{
+      ...(schedulerTrigger?{
         lastSchedulerResult:'FAILED',
         lastSchedulerError:String(e.message||e).slice(0,500),
-        lastSchedulerDurationMs:Date.now()-started
+        lastSchedulerDurationMs:Date.now()-started,
+        lastSchedulerSlotAttempt:schedulerSlot,
+        lastSchedulerSource:trigger
       }:{})
     };
     await persistAutoSyncStatus().catch(()=>{});
@@ -2516,44 +2596,7 @@ app.get('/api/meta', requireAuth, (req,res)=>{
 });
 
 
-app.get('/api/auto-sync/health', requireAuth, (req,res)=>{
-  const fallbackSchedulerSuccess =
-    autoSyncStatus.lastTrigger==='github-actions' && autoSyncStatus.lastResult==='SUCCESS'
-      ? autoSyncStatus.lastSuccessAt
-      : null;
-
-  const fallbackSchedulerAttempt =
-    autoSyncStatus.lastTrigger==='github-actions'
-      ? autoSyncStatus.lastAttemptAt
-      : null;
-
-  const fallbackSchedulerResult =
-    autoSyncStatus.lastTrigger==='github-actions'
-      ? autoSyncStatus.lastResult
-      : null;
-
-  const fallbackSchedulerError =
-    autoSyncStatus.lastTrigger==='github-actions' && autoSyncStatus.lastResult==='FAILED'
-      ? autoSyncStatus.lastError
-      : null;
-
-  res.json({
-    configured:autoSyncConfigured(),
-    running:!!autoSyncStatus.running,
-    lastAttemptAt:autoSyncStatus.lastAttemptAt||null,
-    lastSuccessAt:autoSyncStatus.lastSuccessAt||null,
-    lastResult:autoSyncStatus.lastResult||null,
-    lastTrigger:autoSyncStatus.lastTrigger||null,
-    lastSchedulerAttemptAt:autoSyncStatus.lastSchedulerAttemptAt||fallbackSchedulerAttempt||null,
-    lastSchedulerSuccessAt:autoSyncStatus.lastSchedulerSuccessAt||fallbackSchedulerSuccess||null,
-    lastSchedulerResult:autoSyncStatus.lastSchedulerResult||fallbackSchedulerResult||null,
-    lastSchedulerError:autoSyncStatus.lastSchedulerError||fallbackSchedulerError||null,
-    schedule:['00:00','06:00','12:00','18:00'],
-    timezone:'Asia/Jakarta',
-    graceMinutes:10
-  });
-});
-
+// V36: scheduler health endpoint removed (manual RUN NOW only).
 app.get('/api/meta/products', requireAuth, (req,res)=>{
   const q=String(req.query.q||'').trim().toUpperCase();
   if (q.length<2) return res.json([]);
@@ -2675,22 +2718,7 @@ app.post('/api/admin/auto-sync/run', requireAdmin, async (req,res)=>{
   }
 });
 
-// External scheduler endpoint. Protected by AUTO_SYNC_SECRET.
-// GitHub Actions calls this endpoint four times per day.
-app.post('/api/automation/sales-sync', async (req,res)=>{
-  const configured=metabaseSettings();
-  const provided=bearerSecret(req);
-  if(!configured.triggerSecret || !secretsEqual(provided,configured.triggerSecret)){
-    return res.status(401).json({error:'INVALID_AUTO_SYNC_SECRET'});
-  }
-  try{
-    const result=await runMetabaseAutoSync('github-actions');
-    res.json(result);
-  }catch(e){
-    res.status(e.statusCode||500).json({error:e.message});
-  }
-});
-
+// V36: external scheduler endpoint removed; use authenticated Admin RUN NOW only.
 app.get('/api/admin/upload-policy', requireAdmin, (req,res)=>res.json(uploadPolicy()));
 app.get('/api/admin/months', requireAdmin, (req,res)=>res.json({storageRange:{start:STORAGE_START_MONTH,end:STORAGE_END_MONTH}, months:monthSlots()}));
 
@@ -2922,4 +2950,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
