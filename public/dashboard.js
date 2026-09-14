@@ -29,7 +29,40 @@ function timeFactorChip(period,id='targetTimeFactor'){
 }
 
 function monthRange(iso,offset=0){const d=parseISO(iso);d.setMonth(d.getMonth()+offset);const y=d.getFullYear(),m=d.getMonth();const a=new Date(y,m,1),b=new Date(y,m+1,0);return{start:localISO(a),end:localISO(b)}}
-function defaultPeriods(){const today=localISO(new Date());const max=META.maxDate||today;const current={start:max.slice(0,8)+'01',end:max};return[current,monthRange(max,-1),monthRange(max,-2)]}
+
+// Shift a date by calendar months while preserving the day number as far as
+// the destination month allows. Example: 2026-03-31 - 1 month = 2026-02-28.
+function shiftDateMonthsClamped(iso,offset){
+  const [y,m,d]=String(iso).split('-').map(Number);
+  const total=y*12+(m-1)+offset;
+  const ty=Math.floor(total/12);
+  const tm=((total%12)+12)%12;
+  const lastDay=new Date(ty,tm+1,0).getDate();
+  const td=Math.min(d,lastDay);
+  return `${ty}-${String(tm+1).padStart(2,'0')}-${String(td).padStart(2,'0')}`;
+}
+
+function linkedPreviousPeriod(current,offset){
+  return {
+    start:shiftDateMonthsClamped(current.start,offset),
+    end:shiftDateMonthsClamped(current.end,offset)
+  };
+}
+
+function syncLinkedPreviousPeriods(section){
+  const state=S[section];
+  if(!state?.periods?.length)return;
+  const current=state.periods[0];
+  state.periods[1]=linkedPreviousPeriod(current,-1);
+  state.periods[2]=linkedPreviousPeriod(current,-2);
+}
+
+function defaultPeriods(){
+  const today=localISO(new Date());
+  const max=META.maxDate||today;
+  const current={start:max.slice(0,8)+'01',end:max};
+  return [current,linkedPreviousPeriod(current,-1),linkedPreviousPeriod(current,-2)];
+}
 function all(arr,key){return arr.map(x=>key?x[key]:x)}
 
 function initState(){const p=defaultPeriods();const common={
@@ -413,7 +446,21 @@ function setupRange(f){
               if(daysInput)daysInput.value=S[sec].bestEstDays;
             }
           }
-        }else S[sec].periods[Number(key.slice(1))]=p;
+        }else{
+          const idx=Number(key.slice(1));
+          S[sec].periods[idx]=p;
+
+          // Current period drives the default Previous 1 / Previous 2 dates.
+          // Users may still manually edit P1/P2 afterwards.
+          if(idx===0){
+            syncLinkedPreviousPeriods(sec);
+            // Re-render controls so the newly calculated previous periods
+            // are immediately visible without needing a page refresh.
+            temp=null;
+            renderFilters();
+            return;
+          }
+        }
 
         temp=null;
         btn.firstElementChild.textContent=rangeLabel(p);
