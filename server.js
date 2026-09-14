@@ -31,6 +31,7 @@ const RAW_CACHE_FILE = path.join(DATA_DIR, 'raw-cache.json'); // legacy combined
 const RAW_CACHE_GZ_FILE = path.join(DATA_DIR, 'raw-cache.json.gz');
 const RUNTIME_FILE = path.join(DATA_DIR, 'runtime.json');
 const AUTO_SYNC_FILE = path.join(DATA_DIR, 'auto-sync.json');
+const METABASE_SESSION_FILE = path.join(DATA_DIR, 'metabase-session.enc.json');
 const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
 const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
 const META_INDEX_FILE = path.join(DATA_DIR, 'meta-index.json');
@@ -159,8 +160,10 @@ let autoSyncStatus = {
   lastSchedulerSuccessAt:null,
   lastSchedulerResult:null,
   lastSchedulerError:null,
-  lastSchedulerDurationMs:null
+  lastSchedulerDurationMs:null,
+  lastAuthMode:null
 };
+let metabaseSessionMemory=null;
 let dataWriteBusy=false;
 let dataWriteOwner=null;
 
@@ -1611,6 +1614,12 @@ function publicAutoSyncStatus(){
     schedule:'00:00, 06:00, 12:00, 18:00 WIB',
     timezone:'Asia/Jakarta',
     dateRule:'Tanggal 1 bulan berjalan → tanggal hari ini',
+    sessionReuse:{
+      enabled:true,
+      persistent:true,
+      encrypted:true,
+      lastAuthMode:autoSyncStatus.lastAuthMode||null
+    },
     credentialState:{
       url:!!s.baseUrl,
       username:!!s.username,
@@ -1637,6 +1646,106 @@ function secretsEqual(a,b){
   return crypto.timingSafeEqual(aa,bb);
 }
 
+function metabaseSessionKey(){
+  // Optional dedicated key; otherwise reuse the already-secret JWT_SECRET.
+  const seed=envText('METABASE_SESSION_KEY') || JWT_SECRET;
+  return crypto.createHash('sha256').update(`metabase-session-v33|${seed}`).digest();
+}
+
+function metabaseSessionFingerprint(settings){
+  return crypto
+    .createHash('sha256')
+    .update(`${settings.baseUrl}|${String(settings.username||'').trim().toLowerCase()}`)
+    .digest('hex');
+}
+
+function encryptSessionPayload(payload){
+  const iv=crypto.randomBytes(12);
+  const cipher=crypto.createCipheriv('aes-256-gcm',metabaseSessionKey(),iv);
+  const encrypted=Buffer.concat([
+    cipher.update(JSON.stringify(payload),'utf8'),
+    cipher.final()
+  ]);
+  const tag=cipher.getAuthTag();
+
+  return {
+    v:1,
+    alg:'aes-256-gcm',
+    iv:iv.toString('base64'),
+    tag:tag.toString('base64'),
+    data:encrypted.toString('base64')
+  };
+}
+
+function decryptSessionPayload(box){
+  if(!box || box.v!==1 || box.alg!=='aes-256-gcm') {
+    throw new Error('Unsupported session cache format');
+  }
+  const decipher=crypto.createDecipheriv(
+    'aes-256-gcm',
+    metabaseSessionKey(),
+    Buffer.from(box.iv,'base64')
+  );
+  decipher.setAuthTag(Buffer.from(box.tag,'base64'));
+  const plain=Buffer.concat([
+    decipher.update(Buffer.from(box.data,'base64')),
+    decipher.final()
+  ]);
+  return JSON.parse(plain.toString('utf8'));
+}
+
+async function saveMetabaseSession(sessionId,settings){
+  const payload={
+    sessionId,
+    createdAt:new Date().toISOString(),
+    fingerprint:metabaseSessionFingerprint(settings)
+  };
+  const encrypted=encryptSessionPayload(payload);
+  await writeJsonAtomic(METABASE_SESSION_FILE,encrypted);
+  await fsp.chmod(METABASE_SESSION_FILE,0o600).catch(()=>{});
+  metabaseSessionMemory=payload;
+  console.log('[METABASE_SESSION] new session saved to encrypted persistent cache');
+}
+
+async function clearMetabaseSession(reason=''){
+  metabaseSessionMemory=null;
+  await fsp.unlink(METABASE_SESSION_FILE).catch(()=>{});
+  if(reason)console.log(`[METABASE_SESSION] cached session cleared: ${reason}`);
+}
+
+async function loadMetabaseSession(settings){
+  const expected=metabaseSessionFingerprint(settings);
+
+  if(
+    metabaseSessionMemory?.sessionId &&
+    metabaseSessionMemory.fingerprint===expected
+  ){
+    return metabaseSessionMemory;
+  }
+
+  try{
+    const box=await readJson(METABASE_SESSION_FILE,null);
+    if(!box)return null;
+
+    const payload=decryptSessionPayload(box);
+    if(
+      !payload?.sessionId ||
+      payload.fingerprint!==expected
+    ){
+      await clearMetabaseSession('account/base URL changed');
+      return null;
+    }
+
+    metabaseSessionMemory=payload;
+    console.log('[METABASE_SESSION] restored encrypted session from persistent volume');
+    return payload;
+  }catch(e){
+    console.warn(`[METABASE_SESSION] could not restore cached session: ${e.message}`);
+    await clearMetabaseSession('cache unreadable or encryption key changed');
+    return null;
+  }
+}
+
 async function metabaseLogin(settings){
   const r=await fetch(`${settings.baseUrl}/api/session`,{
     method:'POST',
@@ -1646,11 +1755,35 @@ async function metabaseLogin(settings){
   });
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,300);
-    throw new Error(`METABASE_LOGIN_FAILED (${r.status})${txt?': '+txt:''}`);
+    const e=new Error(`METABASE_LOGIN_FAILED (${r.status})${txt?': '+txt:''}`);
+    e.statusCode=r.status;
+    throw e;
   }
   const d=await r.json();
   if(!d?.id)throw new Error('METABASE_LOGIN_FAILED: session id not returned');
+
+  await saveMetabaseSession(d.id,settings);
   return d.id;
+}
+
+async function getMetabaseSession(settings,{forceLogin=false}={}){
+  if(!forceLogin){
+    const cached=await loadMetabaseSession(settings);
+    if(cached?.sessionId){
+      console.log('[METABASE_SESSION] reusing cached session; no new login');
+      return {sessionId:cached.sessionId,authMode:'cached-session'};
+    }
+  }
+
+  if(forceLogin){
+    await clearMetabaseSession('forced refresh after rejected session');
+  }
+
+  const sessionId=await metabaseLogin(settings);
+  return {
+    sessionId,
+    authMode:forceLogin?'refreshed-login':'new-login'
+  };
 }
 
 function autoSyncDateRange(){
@@ -1844,11 +1977,36 @@ async function openMetabaseCsv(settings,sessionId,startDate,endDate){
 
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,500);
-    throw new Error(`METABASE_CSV_FAILED (${r.status})${txt?': '+txt:''}`);
+    const e=new Error(`METABASE_CSV_FAILED (${r.status})${txt?': '+txt:''}`);
+    e.statusCode=r.status;
+    throw e;
   }
   if(!r.body)throw new Error('METABASE_CSV_FAILED: empty response');
 
   return r;
+}
+
+async function openMetabaseCsvWithSessionReuse(settings,startDate,endDate){
+  let auth=await getMetabaseSession(settings);
+
+  try{
+    const response=await openMetabaseCsv(
+      settings,auth.sessionId,startDate,endDate
+    );
+    return {response,authMode:auth.authMode};
+  }catch(e){
+    if(e.statusCode!==401 && e.statusCode!==403)throw e;
+
+    console.warn(
+      `[METABASE_SESSION] cached session rejected with HTTP ${e.statusCode}; logging in once to refresh`
+    );
+
+    auth=await getMetabaseSession(settings,{forceLogin:true});
+    const response=await openMetabaseCsv(
+      settings,auth.sessionId,startDate,endDate
+    );
+    return {response,authMode:'refreshed-login'};
+  }
 }
 
 async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
@@ -2136,11 +2294,11 @@ async function runMetabaseAutoSync(trigger='scheduler'){
   try{
     console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream-urlencoded`);
 
-    const sessionId=await metabaseLogin(settings);
-    const response=await openMetabaseCsv(
-      settings,sessionId,range.startDate,range.endDate
+    const {response,authMode}=await openMetabaseCsvWithSessionReuse(
+      settings,range.startDate,range.endDate
     );
 
+    console.log(`[AUTO_SYNC] Metabase auth=${authMode}`);
     console.log('[AUTO_SYNC] Metabase CSV stream opened; parsing row-by-row');
 
     const streamed=await streamReplaceMonthFromMetabaseCsv(
@@ -2168,6 +2326,7 @@ async function runMetabaseAutoSync(trigger='scheduler'){
       lastDurationMs:durationMs,
       lastTrigger:trigger,
       lastSourceFile:sourceFile,
+      lastAuthMode:authMode,
       ...(trigger==='github-actions'?{
         lastSchedulerSuccessAt:new Date().toISOString(),
         lastSchedulerResult:'SUCCESS',
@@ -2681,4 +2840,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Auto Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Monthly closing: disabled`)));
