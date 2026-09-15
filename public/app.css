@@ -1167,3 +1167,92 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
     grid-column:auto;
   }
 }
+
+
+/* V40 — Section 8 final table proportions
+   Order per period: Sales | Qty | Unit_Code */
+#itemSalesTable{
+  overflow-x:auto;
+}
+
+#itemSalesTable .item-sales-table{
+  table-layout:fixed !important;
+  width:auto !important;
+  min-width:1535px;
+}
+
+#itemSalesTable .item-sales-table th,
+#itemSalesTable .item-sales-table td{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* SKU */
+#itemSalesTable .item-sales-table th:nth-child(1),
+#itemSalesTable .item-sales-table td:nth-child(1){
+  width:130px !important;
+  min-width:130px !important;
+  max-width:130px !important;
+}
+
+/* Item — deliberately wider */
+#itemSalesTable .item-sales-table th:nth-child(2),
+#itemSalesTable .item-sales-table td:nth-child(2){
+  width:390px !important;
+  min-width:390px !important;
+  max-width:390px !important;
+}
+
+/* Brand */
+#itemSalesTable .item-sales-table th:nth-child(3),
+#itemSalesTable .item-sales-table td:nth-child(3){
+  width:125px !important;
+  min-width:125px !important;
+  max-width:125px !important;
+}
+
+/* Sales columns: proportional, not excessively wide */
+#itemSalesTable .item-sales-table th:nth-child(4),
+#itemSalesTable .item-sales-table td:nth-child(4),
+#itemSalesTable .item-sales-table th:nth-child(7),
+#itemSalesTable .item-sales-table td:nth-child(7),
+#itemSalesTable .item-sales-table th:nth-child(10),
+#itemSalesTable .item-sales-table td:nth-child(10){
+  width:135px !important;
+  min-width:135px !important;
+  max-width:135px !important;
+}
+
+/* Qty columns: fixed */
+#itemSalesTable .item-sales-table th:nth-child(5),
+#itemSalesTable .item-sales-table td:nth-child(5),
+#itemSalesTable .item-sales-table th:nth-child(8),
+#itemSalesTable .item-sales-table td:nth-child(8),
+#itemSalesTable .item-sales-table th:nth-child(11),
+#itemSalesTable .item-sales-table td:nth-child(11){
+  width:72px !important;
+  min-width:72px !important;
+  max-width:72px !important;
+}
+
+/* Unit Code columns: fixed */
+#itemSalesTable .item-sales-table th:nth-child(6),
+#itemSalesTable .item-sales-table td:nth-child(6),
+#itemSalesTable .item-sales-table th:nth-child(9),
+#itemSalesTable .item-sales-table td:nth-child(9),
+#itemSalesTable .item-sales-table th:nth-child(12),
+#itemSalesTable .item-sales-table td:nth-child(12){
+  width:82px !important;
+  min-width:82px !important;
+  max-width:82px !important;
+  text-align:center;
+}
+
+#itemSalesTable .item-sales-table td.unit-code{
+  text-align:center;
+}
+
+#itemSalesTable .item-sales-table thead tr:nth-child(2) th{
+  text-align:center;
+}

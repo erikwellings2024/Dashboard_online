@@ -781,39 +781,45 @@ function renderItemSales(d){
   const ps=periodsFor('itemSales');
   const n=ps.length;
   const mode=d.metricMode||S.itemSales.metricMode;
-  const metricKey=mode==='qty'?'qty':'sales';
   const summaryLabel=mode==='qty'?'QTY':'SALES';
 
-  let h=`<table class="sortable-table chart-table item-sales-table" data-chart-label="1" data-chart-cols="5,8${n===3?',11':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead>
+  // data-chart-cols uses zero-based table column indexes:
+  // SKU=0, Item=1, Brand=2,
+  // Current Sales=3, P1 Sales=6, P2 Sales=9.
+  let h=`<table class="sortable-table chart-table item-sales-table" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead>
     <tr>
       <th rowspan="2">SKU</th>
-      <th rowspan="2">item_name</th>
-      <th rowspan="2">brand</th>
+      <th rowspan="2">Item</th>
+      <th rowspan="2">Brand</th>
       <th colspan="3">CURRENT SALES<span class="period-sub">${rangeLabel(ps[0])}</span></th>
       <th colspan="3">PREVIOUS 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>
       ${n===3?`<th colspan="3">PREVIOUS 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}
     </tr>
     <tr>
-      ${Array.from({length:n},()=>'<th>qty</th><th>unit_code</th><th>sub_total_inv</th>').join('')}
+      ${Array.from({length:n},()=>'<th>Sales</th><th>Qty</th><th>Unit_Code</th>').join('')}
     </tr>
   </thead><tbody>`;
 
   for(const r of d.rows||[]){
     h+=`<tr>
       <td>${esc(r.sku)}</td>
-      <td>${esc(r.itemName)}</td>
+      <td title="${esc(r.itemName)}">${esc(r.itemName)}</td>
       <td>${esc(r.brand)}</td>
-      ${r.periods.slice(0,n).map(m=>`<td class="num">${fmt(m.qty)}</td><td>${esc(m.unitCode||'')}</td><td class="num">${fmt(m.sales)}</td>`).join('')}
+      ${r.periods.slice(0,n).map(m=>`
+        <td class="num">${fmt(m.sales)}</td>
+        <td class="num">${fmt(m.qty)}</td>
+        <td class="unit-code">${esc(m.unitCode||'')}</td>
+      `).join('')}
     </tr>`;
   }
 
   const summaryCells=(arr,share=false)=>arr.slice(0,n).map((m,i)=>{
     if(mode==='qty'){
       const value=share?d.displayedShare[i]:m.qty;
-      return `<td class="num">${share?pct(value):fmt(value)}</td><td></td><td></td>`;
+      return `<td></td><td class="num">${share?pct(value):fmt(value)}</td><td></td>`;
     }
     const value=share?d.displayedShare[i]:m.sales;
-    return `<td></td><td></td><td class="num">${share?pct(value):fmt(value)}</td>`;
+    return `<td class="num">${share?pct(value):fmt(value)}</td><td></td><td></td>`;
   }).join('');
 
   h+=`<tr class="rank-summary no-sort-row"><td colspan="3">TOTAL ${summaryLabel} DISPLAYED</td>${summaryCells(d.totalDisplayed)}</tr>`;
