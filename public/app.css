@@ -843,3 +843,96 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 #dailyTable .daily-trend-table tbody tr:not(.daily-grand-total):not(.daily-average):hover td{
   background:#f8fbfd;
 }
+
+
+/* V37 — collapsible sections */
+.section-toggle-btn{
+  background:#fff;
+  border:1px solid #9aa9b6;
+  color:#263746;
+  min-width:64px;
+  font-weight:700;
+}
+.section-collapsed > :not(.section-head){
+  display:none !important;
+}
+.section-collapsed .section-actions > :not(.section-toggle-btn){
+  display:none !important;
+}
+.section-collapsed{
+  margin-bottom:8px;
+}
+
+/* V37 — Store Performance PT breakdown */
+.pt-detail-row{
+  display:none;
+}
+.pt-detail-row.pt-expanded{
+  display:table-row;
+}
+.pt-expand-btn{
+  width:24px;
+  height:22px;
+  line-height:18px;
+  padding:0;
+  border:1px solid #84919d;
+  background:#fff;
+  font-weight:700;
+  cursor:pointer;
+}
+.store-avg-row{
+  background:#efc8ea !important;
+}
+.pt-total-row{
+  font-weight:700;
+}
+.pt-efm{
+  background:#d9efcf;
+}
+.pt-efit{
+  background:#c7e9f6;
+}
+.pt-esb{
+  background:#62e9ed;
+}
+.total-by-pt{
+  background:#f7d9ca;
+  font-weight:700;
+}
+.existing-total{
+  background:#fff600;
+  font-weight:700;
+}
+.new-total{
+  background:#cfeaf5;
+  font-weight:700;
+}
+
+/* V37 — Daily Trend contribution */
+#dailyTable .daily-contribution td{
+  background:#e9f2df !important;
+  font-weight:700;
+  color:#245b32;
+}
+
+/* V37 — Top Items by Sales */
+#itemSalesTable .item-sales-table{
+  width:100%;
+  table-layout:auto;
+}
+#itemSalesTable .item-sales-table th{
+  text-align:center;
+  white-space:nowrap;
+}
+#itemSalesTable .item-sales-table th:nth-child(1){
+  min-width:125px;
+}
+#itemSalesTable .item-sales-table th:nth-child(2){
+  min-width:330px;
+}
+#itemSalesTable .item-sales-table th:nth-child(3){
+  min-width:120px;
+}
+#itemSalesTable .rank-summary td{
+  font-weight:700;
+}

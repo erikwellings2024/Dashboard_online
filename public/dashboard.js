@@ -81,6 +81,7 @@ S.store={periods:clone(p),prevCount:2,metricMode:'value',product:'',productLabel
 S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
 function rangeControl(section,key,label,period){
@@ -196,6 +197,17 @@ function activeFilterChips(section){
     chips+=activeProductChip(s);
   }
 
+  if(section==='itemSales'){
+    chips+=activeMultiChip('Channel',s.filters.channels,META.channels);
+    chips+=activeMultiChip('Store',s.filters.stores,META.stores);
+    chips+=activeMultiChip('Category',s.filters.categories,META.categories);
+    chips+=activeMultiChip('Brand',s.filters.brands,META.brands);
+    chips+=activeMultiChip('Sales Type',s.filters.salesTypes,META.salesTypes);
+    chips+=activeMultiChip('Customer Type',s.filters.customerTypes,META.customerTypes||[]);
+    chips+=activeMultiChip('Store Stat',s.filters.storeStats,META.storeStats||[]);
+    chips+=activeProductChip(s);
+  }
+
   return chips;
 }
 
@@ -218,10 +230,13 @@ function renderFilters(){
   $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${rangeControl('brand','p1','Previous 1',b.periods[1])}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('brand')}</div>`;
 
   const it=S.item;
-  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
+  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
 
   const dy=S.daily;
   $('#dailyFilters').innerHTML=`<div class="filter-grid">${rangeControl('daily','period','Current Period',dy.period)}${multiControl('daily','channels','Channel',META.channels,dy.filters.channels,true)}${multiControl('daily','stores','Store',META.stores,dy.filters.stores,true)}${multiControl('daily','categories','Category',META.categories,dy.filters.categories,true)}${multiControl('daily','brands','Brand',META.brands,dy.filters.brands,true)}${multiControl('daily','salesTypes','Sales Type',META.salesTypes,dy.filters.salesTypes)}${multiControl('daily','customerTypes','Customer Type',META.customerTypes||[],dy.filters.customerTypes)}${multiControl('daily','storeStats','Store Stat',META.storeStats||[],dy.filters.storeStats)}${productPicker('daily','Item (SKU / Name)')}<button class="apply" data-apply="daily">APPLY</button></div><div class="chips"><span class="chip"><b>Section 7 only</b></span>${activeFilterChips('daily')}</div>`;
+
+  const is=S.itemSales;
+  $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${rangeControl('itemSales','p1','Previous 1',is.periods[1])}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${productPicker('itemSales','Item (SKU / Name)')}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('itemSales')}</div>`;
 
   bindFilters();
 }
@@ -522,7 +537,8 @@ if(sec==='store'){showLoad('#storeTable');const filters=reqFilters('store');filt
 if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{method:'POST',body:JSON.stringify({periods:periodsFor('brand'),filters:reqFilters('brand'),topN:S.brand.topN,metricMode:S.brand.metricMode})});renderBrand(d)}
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
 if(sec==='daily'){showLoad('#dailyTable');const filters=reqFilters('daily');filters.product=S.daily.product;const d=await api('/api/query/daily-trend',{method:'POST',body:JSON.stringify({period:S.daily.period,filters,metricMode:S.daily.metricMode})});renderDailyTrend(d)}
-}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+if(sec==='itemSales'){showLoad('#itemSalesTable');const filters=reqFilters('itemSales');filters.product=S.itemSales.product;const d=await api('/api/query/item-sales',{method:'POST',body:JSON.stringify({periods:periodsFor('itemSales'),filters,topN:S.itemSales.topN,metricMode:S.itemSales.metricMode})});renderItemSales(d)}
+}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
 
@@ -610,13 +626,16 @@ function renderStore(d){
   const basketLabel=qtyMode?'BASKET QTY':'BASKET SIZE';
   const get=(m,k)=>Number(m?.[k]||0);
 
-  let h=`<table class="sortable-table chart-table" data-chart-label="2"><thead><tr><th rowspan="2">STORE STAT</th><th rowspan="2">PT</th><th rowspan="2">STORE</th><th colspan="${n}">${primaryLabel}</th><th colspan="${n}">TRX</th><th colspan="${n}">${basketLabel}</th></tr><tr>${[primaryLabel,'Trx',basketLabel].map(()=>order.map(i=>`<th>${i===0?'Current':'Previous '+i}<span class="period-sub">${rangeLabel(ps[i])}</span></th>`).join('')).join('')}</tr></thead><tbody>`;
+  let h=`<table class="sortable-table chart-table store-performance-table" data-chart-label="2"><thead><tr><th rowspan="2">STORE STAT</th><th rowspan="2">PT</th><th rowspan="2">STORE</th><th colspan="${n}">${primaryLabel}</th><th colspan="${n}">TRX</th><th colspan="${n}">${basketLabel}</th></tr><tr>${[primaryLabel,'Trx',basketLabel].map(()=>order.map(i=>`<th>${i===0?'Current':'Previous '+i}<span class="period-sub">${rangeLabel(ps[i])}</span></th>`).join('')).join('')}</tr></thead><tbody>`;
 
   const metricVal=(m,metric)=>metric===0?get(m,primaryKey):metric===1?get(m,'trx'):get(m,basketKey);
+  const metricCells=periodMetrics=>[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt(metricVal(periodMetrics[i],metric))}</td>`).join('')).join('');
 
-  for(const r of d.rows)h+=`<tr><td>${r.storeStat==='New Store'?'New':'Exist'}</td><td>${esc(r.pt)}</td><td>${esc(r.store)}</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt(metricVal(r.periods[i],metric))}</td>`).join('')).join('')}</tr>`;
+  for(const r of d.rows){
+    h+=`<tr><td>${r.storeStat==='New Store'?'New':'Exist'}</td><td>${esc(r.pt)}</td><td>${esc(r.store)}</td>${metricCells(r.periods)}</tr>`;
+  }
 
-  h+=`<tr class="total no-sort-row"><td colspan="3">ALL STORE</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt(metricVal(d.total[i],metric))}</td>`).join('')).join('')}</tr>`;
+  h+=`<tr class="total no-sort-row"><td colspan="3">ALL STORE</td>${metricCells(d.total)}</tr>`;
 
   const row=(label,cls,fn)=>`<tr class="no-sort-row"><td colspan="3" class="${cls}">${label}</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num ${cls}">${fn(i,metric)}</td>`).join('')).join('')}</tr>`;
   h+=row('Variance Value','summary-blue-label',(i,metric)=>{
@@ -629,20 +648,40 @@ function renderStore(d){
     const k=metric===0?(qtyMode?'qtyPct':'salesPct'):metric===1?'trxPct':(qtyMode?'basketQtyPct':'basketPct');
     return fp(v[k]);
   });
-  h+=row('Avg Per Day','summary-light',(i,metric)=>{
+  h+=row('Avg Per Day','store-avg-row',(i,metric)=>{
     const m=d.avgPerDay[i]||{};
     const k=metric===0?primaryKey:metric===1?'trx':basketKey;
     return fmt(m[k]);
   });
 
-  for(const pt of d.ptTotals)h+=`<tr class="no-sort-row"><td colspan="2">${pt.pt}</td><td>PT TOTAL</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt(metricVal(pt.periods[i],metric))}</td>`).join('')).join('')}</tr>`;
-  h+=`<tr class="total no-sort-row"><td colspan="3">TOTAL</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num">${fmt(metricVal(d.total[i],metric))}</td>`).join('')).join('')}</tr></tbody></table>`;
+  // PT summary section. Existing/New rows are collapsed by default.
+  for(const pt of (d.ptBreakdown||[])){
+    h+=`<tr class="no-sort-row pt-detail-row" data-pt="${esc(pt.pt)}"><td></td><td>${esc(pt.pt)}</td><td>Exist Store</td>${metricCells(pt.existing)}</tr>`;
+    h+=`<tr class="no-sort-row pt-detail-row" data-pt="${esc(pt.pt)}"><td></td><td>${esc(pt.pt)}</td><td>New Store</td>${metricCells(pt.newStore)}</tr>`;
+    h+=`<tr class="no-sort-row pt-total-row pt-${esc(pt.pt.toLowerCase())}"><td></td><td><button type="button" class="pt-expand-btn" data-pt="${esc(pt.pt)}" aria-expanded="false">＋</button> ${esc(pt.pt)}</td><td>PT TOTAL</td>${metricCells(pt.total)}</tr>`;
+  }
+
+  h+=`<tr class="no-sort-row total-by-pt"><td colspan="3">TOTAL By PT</td>${metricCells(d.total)}</tr>`;
+  h+=`<tr class="no-sort-row existing-total"><td colspan="3">Existing Store</td>${metricCells(d.storeStatTotals?.existing||[])}</tr>`;
+  h+=`<tr class="no-sort-row new-total"><td colspan="3">New Store</td>${metricCells(d.storeStatTotals?.newStore||[])}</tr>`;
+  h+='</tbody></table>';
 
   $('#storeTable').innerHTML=h;
   const t=$('#storeTable table');
   t.dataset.chartCols=n===3?'3,4,5':'3,4';
   t.dataset.chartSeries=n===3?'Current,Previous 1,Previous 2':'Current,Previous 1';
   enhanceTable(t);
+
+  $$('.pt-expand-btn',t).forEach(btn=>{
+    btn.onclick=()=>{
+      const pt=btn.dataset.pt;
+      const rows=$$(`.pt-detail-row[data-pt="${pt}"]`,t);
+      const expand=btn.getAttribute('aria-expanded')!=='true';
+      btn.setAttribute('aria-expanded',expand?'true':'false');
+      btn.textContent=expand?'−':'＋';
+      rows.forEach(r=>r.classList.toggle('pt-expanded',expand));
+    };
+  });
 }
 
 
@@ -730,10 +769,60 @@ function renderDailyTrend(d){
 
   h+=`<tr class="daily-grand-total no-sort-row"><td>Grand Total</td>${channels.map(c=>`<td class="num">${fmtDaily(d.totals?.[c]||0,mode)}</td>`).join('')}<td class="num">${fmtDaily(d.grandTotal||0,mode)}</td></tr>`;
   h+=`<tr class="daily-average no-sort-row"><td>Average / Day</td>${channels.map(c=>`<td class="num">${fmtDaily(d.averages?.[c]||0,mode)}</td>`).join('')}<td class="num">${fmtDaily(d.averageGrandTotal||0,mode)}</td></tr>`;
+  h+=`<tr class="daily-contribution no-sort-row"><td>%Contr</td>${channels.map(c=>`<td class="num">${pct(d.grandTotal?Number(d.totals?.[c]||0)/Number(d.grandTotal):0)}</td>`).join('')}<td class="num">${d.grandTotal?pct(1):pct(0)}</td></tr>`;
   h+='</tbody></table>';
 
   $('#dailyTable').innerHTML=h;
   enhanceTable($('#dailyTable table'));
+}
+
+
+function renderItemSales(d){
+  const ps=periodsFor('itemSales');
+  const n=ps.length;
+  const mode=d.metricMode||S.itemSales.metricMode;
+  const metricKey=mode==='qty'?'qty':'sales';
+  const summaryLabel=mode==='qty'?'QTY':'SALES';
+
+  let h=`<table class="sortable-table chart-table item-sales-table" data-chart-label="1" data-chart-cols="5,8${n===3?',11':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead>
+    <tr>
+      <th rowspan="2">SKU</th>
+      <th rowspan="2">item_name</th>
+      <th rowspan="2">brand</th>
+      <th colspan="3">CURRENT SALES<span class="period-sub">${rangeLabel(ps[0])}</span></th>
+      <th colspan="3">PREVIOUS 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>
+      ${n===3?`<th colspan="3">PREVIOUS 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}
+    </tr>
+    <tr>
+      ${Array.from({length:n},()=>'<th>qty</th><th>unit_code</th><th>sub_total_inv</th>').join('')}
+    </tr>
+  </thead><tbody>`;
+
+  for(const r of d.rows||[]){
+    h+=`<tr>
+      <td>${esc(r.sku)}</td>
+      <td>${esc(r.itemName)}</td>
+      <td>${esc(r.brand)}</td>
+      ${r.periods.slice(0,n).map(m=>`<td class="num">${fmt(m.qty)}</td><td>${esc(m.unitCode||'')}</td><td class="num">${fmt(m.sales)}</td>`).join('')}
+    </tr>`;
+  }
+
+  const summaryCells=(arr,share=false)=>arr.slice(0,n).map((m,i)=>{
+    if(mode==='qty'){
+      const value=share?d.displayedShare[i]:m.qty;
+      return `<td class="num">${share?pct(value):fmt(value)}</td><td></td><td></td>`;
+    }
+    const value=share?d.displayedShare[i]:m.sales;
+    return `<td></td><td></td><td class="num">${share?pct(value):fmt(value)}</td>`;
+  }).join('');
+
+  h+=`<tr class="rank-summary no-sort-row"><td colspan="3">TOTAL ${summaryLabel} DISPLAYED</td>${summaryCells(d.totalDisplayed)}</tr>`;
+  h+=`<tr class="rank-summary total-all no-sort-row"><td colspan="3">TOTAL ALL ${summaryLabel}</td>${summaryCells(d.totalAll)}</tr>`;
+  h+=`<tr class="rank-summary percent no-sort-row"><td colspan="3">% OF TOTAL</td>${summaryCells(d.totalDisplayed,true)}</tr>`;
+  h+='</tbody></table>';
+
+  $('#itemSalesTable').innerHTML=h;
+  enhanceTable($('#itemSalesTable table'));
 }
 
 
@@ -926,7 +1015,8 @@ async function exportExcel(sec){
       const merges=[];
       const colWidths={};
 
-      $$('tr',src).forEach((tr,ri0)=>{
+      const exportRows=$$('tr',src).filter(tr=>getComputedStyle(tr).display!=='none');
+      exportRows.forEach((tr,ri0)=>{
         const rowNo=ri0+1;
         occupied[rowNo]=occupied[rowNo]||{};
         let colNo=1;
@@ -1099,6 +1189,80 @@ async function refreshUpdateHeader(){
 }
 
 
+
+const SECTION_STATE_MAP={
+  channelSection:'channel',
+  targetSection:'target',
+  categoryTargetSection:'categoryTarget',
+  storeSection:'store',
+  brandSection:'brand',
+  itemSection:'item',
+  dailySection:'daily',
+  itemSalesSection:'itemSales'
+};
+
+function sectionVisibilityKey(){
+  const user=ME?.username||'anonymous';
+  return `sales-dashboard:section-visibility:${user}`;
+}
+
+function loadSectionVisibility(){
+  try{
+    const x=JSON.parse(localStorage.getItem(sectionVisibilityKey())||'{}');
+    return x && typeof x==='object'?x:{};
+  }catch{return {}}
+}
+
+function saveSectionVisibility(prefs){
+  try{localStorage.setItem(sectionVisibilityKey(),JSON.stringify(prefs))}catch{}
+}
+
+function isSectionHiddenByPreference(sectionId){
+  return loadSectionVisibility()[sectionId]===false;
+}
+
+function setupSectionVisibility(){
+  const prefs=loadSectionVisibility();
+
+  $$('.export-section').forEach(sec=>{
+    const id=sec.id;
+    if(!id)return;
+
+    let btn=$('.section-toggle-btn',sec);
+    if(!btn){
+      btn=document.createElement('button');
+      btn.type='button';
+      btn.className='btn section-toggle-btn';
+      const actions=$('.section-actions',sec);
+      if(actions)actions.prepend(btn);
+    }
+
+    const hidden=prefs[id]===false;
+    sec.classList.toggle('section-collapsed',hidden);
+    btn.textContent=hidden?'Show':'Hide';
+    btn.title=hidden?'Show section':'Hide section';
+
+    btn.onclick=async()=>{
+      const nowHidden=!sec.classList.contains('section-collapsed');
+      sec.classList.toggle('section-collapsed',nowHidden);
+      btn.textContent=nowHidden?'Show':'Hide';
+      btn.title=nowHidden?'Show section':'Hide section';
+
+      const latest=loadSectionVisibility();
+      latest[id]=!nowHidden;
+      saveSectionVisibility(latest);
+
+      // Hidden sections make no query on page load. When shown again,
+      // refresh that section once with the user's current filters.
+      if(!nowHidden){
+        const stateKey=SECTION_STATE_MAP[id];
+        if(stateKey)await loadSection(stateKey);
+      }
+    };
+  });
+}
+
+
 async function boot(){
   ME=await api('/api/auth/me');
   $('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;
@@ -1110,8 +1274,11 @@ async function boot(){
 
   initState();
   renderFilters();
+  setupSectionVisibility();
 
-  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily']){
+  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily','itemSales']){
+    const sectionId=Object.keys(SECTION_STATE_MAP).find(k=>SECTION_STATE_MAP[k]===sec);
+    if(sectionId && isSectionHiddenByPreference(sectionId))continue;
     await loadSection(sec);
   }
 
