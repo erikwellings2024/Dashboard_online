@@ -936,3 +936,234 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 #itemSalesTable .rank-summary td{
   font-weight:700;
 }
+
+
+/* V38 — Top Items by Sales: compact and balanced column widths */
+#itemSalesTable{
+  overflow-x:auto;
+}
+
+#itemSalesTable .item-sales-table{
+  table-layout:fixed !important;
+  width:auto !important;
+  min-width:1510px;
+}
+
+#itemSalesTable .item-sales-table th,
+#itemSalesTable .item-sales-table td{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* Identity columns */
+#itemSalesTable .item-sales-table th:nth-child(1),
+#itemSalesTable .item-sales-table td:nth-child(1){
+  width:128px;
+  min-width:128px;
+  max-width:128px;
+}
+
+#itemSalesTable .item-sales-table th:nth-child(2),
+#itemSalesTable .item-sales-table td:nth-child(2){
+  width:310px;
+  min-width:310px;
+  max-width:310px;
+}
+
+#itemSalesTable .item-sales-table th:nth-child(3),
+#itemSalesTable .item-sales-table td:nth-child(3){
+  width:118px;
+  min-width:118px;
+  max-width:118px;
+}
+
+/* Qty columns: Current / P1 / P2 */
+#itemSalesTable .item-sales-table th:nth-child(4),
+#itemSalesTable .item-sales-table td:nth-child(4),
+#itemSalesTable .item-sales-table th:nth-child(7),
+#itemSalesTable .item-sales-table td:nth-child(7),
+#itemSalesTable .item-sales-table th:nth-child(10),
+#itemSalesTable .item-sales-table td:nth-child(10){
+  width:68px;
+  min-width:68px;
+  max-width:68px;
+}
+
+/* Unit Code columns */
+#itemSalesTable .item-sales-table th:nth-child(5),
+#itemSalesTable .item-sales-table td:nth-child(5),
+#itemSalesTable .item-sales-table th:nth-child(8),
+#itemSalesTable .item-sales-table td:nth-child(8),
+#itemSalesTable .item-sales-table th:nth-child(11),
+#itemSalesTable .item-sales-table td:nth-child(11){
+  width:78px;
+  min-width:78px;
+  max-width:78px;
+  text-align:center;
+}
+
+/* Sales value columns */
+#itemSalesTable .item-sales-table th:nth-child(6),
+#itemSalesTable .item-sales-table td:nth-child(6),
+#itemSalesTable .item-sales-table th:nth-child(9),
+#itemSalesTable .item-sales-table td:nth-child(9),
+#itemSalesTable .item-sales-table th:nth-child(12),
+#itemSalesTable .item-sales-table td:nth-child(12){
+  width:126px;
+  min-width:126px;
+  max-width:126px;
+}
+
+
+/* V38 — Store Performance summary palette
+   Softer and consistent with the dashboard's existing blue/green scheme. */
+#storeTable .store-avg-row td{
+  background:#f2e7f1 !important;
+  color:#263746;
+  font-weight:600;
+}
+
+#storeTable .pt-total-row td{
+  font-weight:700;
+  border-top:1px solid #9cabb7;
+  border-bottom:1px solid #9cabb7;
+}
+
+#storeTable .pt-efm td{
+  background:#e7f2e9 !important;
+  color:#234c2e;
+}
+
+#storeTable .pt-efit td{
+  background:#e8f0f7 !important;
+  color:#244b6c;
+}
+
+#storeTable .pt-esb td{
+  background:#e8f4f4 !important;
+  color:#24565b;
+}
+
+#storeTable .total-by-pt td{
+  background:#f6eadf !important;
+  color:#4f3926;
+  font-weight:700;
+  border-top:2px solid #b99f87;
+}
+
+#storeTable .existing-total td{
+  background:#eef5e9 !important;
+  color:#315b32;
+  font-weight:700;
+}
+
+#storeTable .new-total td{
+  background:#eaf1f7 !important;
+  color:#2a526d;
+  font-weight:700;
+}
+
+#storeTable .pt-detail-row td{
+  background:#fafcfd !important;
+  color:#334552;
+}
+
+#storeTable .pt-detail-row td:nth-child(3){
+  padding-left:18px;
+  font-style:italic;
+}
+
+#storeTable .pt-expand-btn{
+  border-color:#9aaab6;
+  background:#fff;
+  color:#263746;
+  border-radius:2px;
+}
+
+#storeTable .pt-expand-btn:hover{
+  background:#eef3f6;
+}
+
+
+/* V39 — Section 8 filter relayout
+   Row 1: Current | P1 | P2 | Channel | Store | Category | Brand |
+          Sales Type | Customer Type | Store Stat | Show Top
+   Row 2: Item (SKU / Name) | Apply
+*/
+#itemSalesFilters .filter-grid{
+  grid-template-columns:
+    minmax(160px,1.22fr)
+    minmax(160px,1.22fr)
+    minmax(160px,1.22fr)
+    minmax(105px,.78fr)
+    minmax(105px,.78fr)
+    minmax(105px,.78fr)
+    minmax(105px,.78fr)
+    minmax(105px,.78fr)
+    minmax(115px,.84fr)
+    minmax(110px,.82fr)
+    minmax(78px,.55fr);
+  align-items:end;
+}
+
+/* Item search starts row 2 and gets enough room for SKU + product name. */
+#itemSalesFilters .product-picker{
+  grid-column:1 / span 3;
+  min-width:0;
+}
+
+/* APPLY sits immediately after Item on row 2. */
+#itemSalesFilters .apply{
+  grid-column:4;
+  width:100%;
+}
+
+/* Suggestion dropdown floats; it must not stretch the filter row. */
+#itemSalesFilters .product-suggest{
+  width:min(620px,72vw);
+  max-width:620px;
+}
+
+/* Keep field labels compact so row 1 remains stable. */
+#itemSalesFilters .field label{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+#itemSalesFilters .control{
+  min-width:0;
+}
+
+/* Smaller desktop: still max two rows where practical. */
+@media(max-width:1600px){
+  #itemSalesFilters .filter-grid{
+    grid-template-columns:repeat(6,minmax(135px,1fr));
+  }
+  #itemSalesFilters .product-picker{
+    grid-column:span 3;
+  }
+  #itemSalesFilters .apply{
+    grid-column:auto;
+  }
+}
+
+@media(max-width:1050px){
+  #itemSalesFilters .filter-grid{
+    grid-template-columns:repeat(3,minmax(145px,1fr));
+  }
+  #itemSalesFilters .product-picker{
+    grid-column:span 2;
+  }
+}
+
+@media(max-width:650px){
+  #itemSalesFilters .filter-grid{
+    grid-template-columns:1fr;
+  }
+  #itemSalesFilters .product-picker,
+  #itemSalesFilters .apply{
+    grid-column:auto;
+  }
+}
