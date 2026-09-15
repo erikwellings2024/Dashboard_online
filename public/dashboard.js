@@ -1032,10 +1032,10 @@ async function exportExcel(sec){
 
       const ws=wb.addWorksheet(uniqueSheetName(wb,title,ti));
       const occupied={};
-      const merges=[];
       const colWidths={};
 
       const exportRows=$$('tr',src).filter(tr=>getComputedStyle(tr).display!=='none');
+
       exportRows.forEach((tr,ri0)=>{
         const rowNo=ri0+1;
         occupied[rowNo]=occupied[rowNo]||{};
@@ -1047,61 +1047,119 @@ async function exportExcel(sec){
           const rs=Math.max(1,Number(td.rowSpan||1));
           const cs=Math.max(1,Number(td.colSpan||1));
           const text=excelCellText(td);
-          const cell=ws.getCell(rowNo,colNo);
           const parsed=excelValue(td,text);
-
-          cell.value=parsed.value;
-          if(parsed.numFmt)cell.numFmt=parsed.numFmt;
-
-          // Copy style from the live dashboard cell so Excel visually matches.
           const st=getComputedStyle(td);
-          cell.fill={
+          const isHeader=td.tagName==='TH';
+          const isNumeric=td.classList.contains('num');
+          const baseHorizontal=isNumeric
+            ?'right'
+            :(isHeader||td.classList.contains('center')?'center':'left');
+
+          const baseFill={
             type:'pattern',
             pattern:'solid',
             fgColor:{argb:cssArgb(st.backgroundColor,'FFFFFFFF')}
           };
-          cell.font={
+          const baseFont={
             name:'Arial',
             size:Math.max(9,Math.min(14,(parseFloat(st.fontSize)||13)*.75)),
             bold:Number(st.fontWeight)>=600,
             color:{argb:cssArgb(st.color,'FF111827')}
           };
-          cell.alignment={
-            vertical:'middle',
-            horizontal:td.classList.contains('num')?'right':(td.tagName==='TH'||td.classList.contains('center')?'center':'left'),
-            wrapText:true
-          };
-          cell.border={
+          const baseBorder={
             top:{style:excelBorderStyle(st.borderTopStyle),color:{argb:cssArgb(st.borderTopColor,'FF7A838D')}},
             bottom:{style:excelBorderStyle(st.borderBottomStyle),color:{argb:cssArgb(st.borderBottomColor,'FF7A838D')}},
             left:{style:excelBorderStyle(st.borderLeftStyle),color:{argb:cssArgb(st.borderLeftColor,'FF7A838D')}},
             right:{style:excelBorderStyle(st.borderRightStyle),color:{argb:cssArgb(st.borderRightColor,'FF7A838D')}}
           };
 
-          if(cs===1){
-            const px=td.getBoundingClientRect().width||0;
-            colWidths[colNo]=Math.max(
-              colWidths[colNo]||0,
-              px ? Math.min(42,Math.max(8,px/7)) : Math.min(36,Math.max(10,text.length+2))
-            );
-          }
-
-          const rowPx=td.getBoundingClientRect().height||0;
-          if(rowPx)ws.getRow(rowNo).height=Math.max(ws.getRow(rowNo).height||0,Math.min(50,rowPx*.75));
-
-          for(let rr=rowNo;rr<rowNo+rs;rr++){
+          // V43: no merged cells anywhere in exported Excel.
+          // Every HTML span is expanded into normal Excel cells. The first cell
+          // carries the value and the rest remain blank, but all keep the same
+          // fill/font/border so the visual report stays close to the dashboard.
+          for(let rOff=0;rOff<rs;rOff++){
+            const rr=rowNo+rOff;
             occupied[rr]=occupied[rr]||{};
-            for(let cc=colNo;cc<colNo+cs;cc++)occupied[rr][cc]=true;
+
+            for(let cOff=0;cOff<cs;cOff++){
+              const cc=colNo+cOff;
+              occupied[rr][cc]=true;
+
+              const cell=ws.getCell(rr,cc);
+              const isOrigin=rOff===0 && cOff===0;
+              cell.value=isOrigin?parsed.value:null;
+              if(isOrigin && parsed.numFmt)cell.numFmt=parsed.numFmt;
+
+              cell.fill={...baseFill,fgColor:{...baseFill.fgColor}};
+              cell.font={...baseFont,color:{...baseFont.color}};
+
+              // Excel's Center Across Selection equivalent is centerContinuous.
+              // Use it only for horizontally grouped header cells. Summary/data
+              // colspan cells remain left/right aligned for lookup-friendly use.
+              const horizontal=(isHeader && cs>1)
+                ?'centerContinuous'
+                :baseHorizontal;
+
+              // Row-spanned header labels cannot be vertically centered across
+              // unmerged cells. Put the label at the bottom of the first row and
+              // remove the internal border, which visually approximates the old
+              // merged header while keeping every cell independent.
+              const vertical=(isHeader && rs>1 && isOrigin)?'bottom':'middle';
+
+              cell.alignment={
+                vertical,
+                horizontal,
+                wrapText:true
+              };
+
+              const border={
+                top:{...baseBorder.top,color:{...baseBorder.top.color}},
+                bottom:{...baseBorder.bottom,color:{...baseBorder.bottom.color}},
+                left:{...baseBorder.left,color:{...baseBorder.left.color}},
+                right:{...baseBorder.right,color:{...baseBorder.right.color}}
+              };
+
+              // Remove only internal span borders. Outer borders remain intact,
+              // so headers/summary rows still look like grouped areas even though
+              // the workbook contains zero merged cells.
+              if(rOff>0)delete border.top;
+              if(rOff<rs-1)delete border.bottom;
+              if(cOff>0)delete border.left;
+              if(cOff<cs-1)delete border.right;
+              cell.border=border;
+            }
           }
-          if(rs>1||cs>1)merges.push([rowNo,colNo,rowNo+rs-1,colNo+cs-1]);
+
+          // Width measurement: for a colspan, distribute the visible width over
+          // its component cells instead of treating it as one giant Excel cell.
+          const px=td.getBoundingClientRect().width||0;
+          const perCellPx=px/cs;
+          for(let cOff=0;cOff<cs;cOff++){
+            const c=colNo+cOff;
+            const fallbackText=isHeader&&cs>1?'':text;
+            const proposed=perCellPx
+              ?Math.min(42,Math.max(7.5,perCellPx/7))
+              :Math.min(36,Math.max(9,(fallbackText.length/cs)+2));
+            colWidths[c]=Math.max(colWidths[c]||0,proposed);
+          }
+
+          // Rowspan cells report the combined pixel height; divide it across the
+          // underlying Excel rows so the first header row does not become huge.
+          const rowPx=td.getBoundingClientRect().height||0;
+          if(rowPx){
+            const perRow=Math.min(42,Math.max(15,(rowPx/rs)*.75));
+            for(let rOff=0;rOff<rs;rOff++){
+              const rr=rowNo+rOff;
+              ws.getRow(rr).height=Math.max(ws.getRow(rr).height||0,perRow);
+            }
+          }
 
           colNo+=cs;
         });
       });
 
-      // Apply merges only after the whole grid is mapped. This prevents
-      // merge-overlap failures in Section 1's grouped two-row header.
-      merges.forEach(m=>ws.mergeCells(...m));
+      // Intentionally NO ws.mergeCells() in V43.
+      // Header grouping uses centerContinuous / Center Across Selection style.
 
       const maxCol=Math.max(ws.columnCount,...Object.keys(colWidths).map(Number),1);
       for(let c=1;c<=maxCol;c++){
@@ -1133,153 +1191,14 @@ async function exportExcel(sec){
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),3000);
   }catch(err){
-    console.error('Excel export failed',err);
-    alert(`Excel export failed: ${err.message||err}`);
+    console.error(err);
+    alert(`Excel export failed: ${err.message}`);
   }finally{
     if(exportButton){
       exportButton.disabled=false;
-      exportButton.textContent=originalText||'Excel';
+      exportButton.textContent=originalText||'Download Excel';
     }
   }
-}
-
-// Chart in new window, clearer separated groups
-$$('.metric-select').forEach(sel=>sel.onchange=()=>{
-  const sec=sel.dataset.section;
-  if(S[sec]){
-    S[sec].metricMode=sel.value==='qty'?'qty':'value';
-    loadSection(sec);
-  }
-});
-$$('.chart-btn').forEach(b=>b.onclick=()=>createChart(b.closest('.section')));
-function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')).slice(0,15);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>r.cells[labelCol]?.textContent||''),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
-
-
-function normalUpdateHeaderText(){
-  const rawDate=META?.maxDate?parseISO(META.maxDate):null;
-  if(!rawDate)return 'NO RAW DATA';
-
-  const updateAt=META.runtime?.updatedAt?new Date(META.runtime.updatedAt):null;
-  const updateTime=updateAt&&!Number.isNaN(updateAt.getTime())
-    ?updateAt.toLocaleTimeString('id-ID',{
-        timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',hour12:false
-      }).replace('.',':')
-    :'--:--';
-
-  const upload=META.runtime?.lastUpload||{};
-  let source='manual update';
-
-  if(upload.mode==='metabase_auto_sync'){
-    source=String(upload.trigger||'').startsWith('admin:')
-      ?'Run Now'
-      :'Metabase update';
-  }else if(upload.mode==='monthly_replace'){
-    source='manual upload';
-  }
-
-  return `Update Sales Data ${rawDate.toLocaleDateString('id-ID',{
-    day:'numeric',month:'short',year:'numeric'
-  })} pk ${updateTime} (by ${source})`;
-}
-
-function renderUpdateHeader(){
-  const el=$('#updatedAt');
-  if(!el)return;
-  el.classList.remove('auto-running','auto-late','auto-failed','auto-not-configured');
-  el.classList.add('auto-ok');
-  el.textContent=normalUpdateHeaderText();
-  el.title='Status update data terakhir';
-}
-
-async function refreshUpdateHeader(){
-  try{
-    const fresh=await api('/api/meta');
-    const before=META?.runtime?.updatedAt||'';
-    const after=fresh?.runtime?.updatedAt||'';
-
-    META=fresh;
-    renderUpdateHeader();
-
-    if(after && before && after!==before){
-      console.log(`[DASHBOARD] data update detected ${before} -> ${after}`);
-    }
-  }catch(e){
-    console.warn('[DASHBOARD] update header refresh failed:',e.message);
-  }
-}
-
-
-
-const SECTION_STATE_MAP={
-  channelSection:'channel',
-  targetSection:'target',
-  categoryTargetSection:'categoryTarget',
-  storeSection:'store',
-  brandSection:'brand',
-  itemSection:'item',
-  dailySection:'daily',
-  itemSalesSection:'itemSales'
-};
-
-function sectionVisibilityKey(){
-  const user=ME?.username||'anonymous';
-  return `sales-dashboard:section-visibility:${user}`;
-}
-
-function loadSectionVisibility(){
-  try{
-    const x=JSON.parse(localStorage.getItem(sectionVisibilityKey())||'{}');
-    return x && typeof x==='object'?x:{};
-  }catch{return {}}
-}
-
-function saveSectionVisibility(prefs){
-  try{localStorage.setItem(sectionVisibilityKey(),JSON.stringify(prefs))}catch{}
-}
-
-function isSectionHiddenByPreference(sectionId){
-  return loadSectionVisibility()[sectionId]===false;
-}
-
-function setupSectionVisibility(){
-  const prefs=loadSectionVisibility();
-
-  $$('.export-section').forEach(sec=>{
-    const id=sec.id;
-    if(!id)return;
-
-    let btn=$('.section-toggle-btn',sec);
-    if(!btn){
-      btn=document.createElement('button');
-      btn.type='button';
-      btn.className='btn section-toggle-btn';
-      const actions=$('.section-actions',sec);
-      if(actions)actions.prepend(btn);
-    }
-
-    const hidden=prefs[id]===false;
-    sec.classList.toggle('section-collapsed',hidden);
-    btn.textContent=hidden?'Show':'Hide';
-    btn.title=hidden?'Show section':'Hide section';
-
-    btn.onclick=async()=>{
-      const nowHidden=!sec.classList.contains('section-collapsed');
-      sec.classList.toggle('section-collapsed',nowHidden);
-      btn.textContent=nowHidden?'Show':'Hide';
-      btn.title=nowHidden?'Show section':'Hide section';
-
-      const latest=loadSectionVisibility();
-      latest[id]=!nowHidden;
-      saveSectionVisibility(latest);
-
-      // Hidden sections make no query on page load. When shown again,
-      // refresh that section once with the user's current filters.
-      if(!nowHidden){
-        const stateKey=SECTION_STATE_MAP[id];
-        if(stateKey)await loadSection(stateKey);
-      }
-    };
-  });
 }
 
 
