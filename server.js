@@ -1672,11 +1672,19 @@ function itemSalesQuery(sourceRows,periods,filters,topN,metricMode='value'){
   let rows=[...groups.entries()].map(([key,rr])=>{
     const [sku,itemName,brand]=key.split('|||');
     const metrics=metricsByPeriod(rr,periods);
+
+    // Historical normalized month files created before V37 did not retain
+    // raw `unit_code`. Prefer the exact unit_code from each period; when a
+    // previous month has no stored unit_code, use the same SKU's unit_code
+    // from the current raw period. Future month refreshes keep the exact
+    // raw unit_code per period.
+    const currentUnitCode=dominantUnitCode(rr,periods[0]);
+
     return {
       sku,itemName,brand,
       periods:metrics.map((m,i)=>({
         ...m,
-        unitCode:dominantUnitCode(rr,periods[i])
+        unitCode:dominantUnitCode(rr,periods[i]) || currentUnitCode
       }))
     };
   });
@@ -3058,4 +3066,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
