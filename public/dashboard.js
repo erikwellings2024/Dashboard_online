@@ -793,7 +793,7 @@ function renderItemSales(d){
     <col class="item-sales-col-unit">
   `).join('');
 
-  let h=`<table class="sortable-table chart-table item-sales-table" style="width:${tableWidth}px" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}">
+  let h=`<table class="sortable-table chart-table item-sales-table" style="--item-sales-table-width:${tableWidth}px" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}">
     <colgroup>
       <col class="item-sales-col-sku">
       <col class="item-sales-col-item">

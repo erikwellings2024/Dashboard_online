@@ -1317,3 +1317,85 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 #itemSalesTable .item-sales-table thead tr:first-child th[colspan="3"]{
   text-align:center;
 }
+
+
+/* V42 — HARD FIX Section 8 widths
+   Previous versions still contained `width:auto !important` and nth-child
+   widths from older CSS. Those rules caused the browser to stretch Current
+   Sales / Qty to fill the viewport.
+
+   From V42 onward:
+   - TABLE width is exact and dynamic.
+   - CELL width declarations are neutralized.
+   - COLGROUP is the single source of truth.
+*/
+
+#itemSalesTable table.item-sales-table{
+  table-layout:fixed !important;
+  width:var(--item-sales-table-width) !important;
+  min-width:var(--item-sales-table-width) !important;
+  max-width:var(--item-sales-table-width) !important;
+}
+
+/* Neutralize every legacy nth-child width on TH/TD. */
+#itemSalesTable table.item-sales-table th,
+#itemSalesTable table.item-sales-table td{
+  width:auto !important;
+  min-width:0 !important;
+  max-width:none !important;
+  box-sizing:border-box !important;
+}
+
+/* COLGROUP is now authoritative. */
+#itemSalesTable table.item-sales-table col.item-sales-col-sku{
+  width:130px !important;
+  min-width:130px !important;
+  max-width:130px !important;
+}
+#itemSalesTable table.item-sales-table col.item-sales-col-item{
+  width:420px !important;
+  min-width:420px !important;
+  max-width:420px !important;
+}
+#itemSalesTable table.item-sales-table col.item-sales-col-brand{
+  width:125px !important;
+  min-width:125px !important;
+  max-width:125px !important;
+}
+#itemSalesTable table.item-sales-table col.item-sales-col-sales{
+  width:140px !important;
+  min-width:140px !important;
+  max-width:140px !important;
+}
+#itemSalesTable table.item-sales-table col.item-sales-col-qty{
+  width:70px !important;
+  min-width:70px !important;
+  max-width:70px !important;
+}
+#itemSalesTable table.item-sales-table col.item-sales-col-unit{
+  width:82px !important;
+  min-width:82px !important;
+  max-width:82px !important;
+}
+
+/* Prevent the table wrapper from forcing the table to 100%. */
+#itemSalesTable.table-wrap{
+  display:block !important;
+  width:100% !important;
+  overflow-x:auto !important;
+}
+
+#itemSalesTable table.item-sales-table thead tr:first-child th[colspan="3"]{
+  width:auto !important;
+}
+
+/* Visual balance */
+#itemSalesTable table.item-sales-table td:nth-child(2){
+  text-align:left !important;
+}
+#itemSalesTable table.item-sales-table td.num{
+  text-align:right !important;
+}
+#itemSalesTable table.item-sales-table td.unit-code{
+  text-align:center !important;
+}
