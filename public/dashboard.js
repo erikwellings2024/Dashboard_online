@@ -786,7 +786,21 @@ function renderItemSales(d){
   // data-chart-cols uses zero-based table column indexes:
   // SKU=0, Item=1, Brand=2,
   // Current Sales=3, P1 Sales=6, P2 Sales=9.
-  let h=`<table class="sortable-table chart-table item-sales-table" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead>
+  const tableWidth=130+420+125+n*(140+70+82);
+  const periodCols=Array.from({length:n},()=>`
+    <col class="item-sales-col-sales">
+    <col class="item-sales-col-qty">
+    <col class="item-sales-col-unit">
+  `).join('');
+
+  let h=`<table class="sortable-table chart-table item-sales-table" style="width:${tableWidth}px" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}">
+    <colgroup>
+      <col class="item-sales-col-sku">
+      <col class="item-sales-col-item">
+      <col class="item-sales-col-brand">
+      ${periodCols}
+    </colgroup>
+    <thead>
     <tr>
       <th rowspan="2">SKU</th>
       <th rowspan="2">Item</th>

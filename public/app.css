@@ -1256,3 +1256,64 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 #itemSalesTable .item-sales-table thead tr:nth-child(2) th{
   text-align:center;
 }
+
+
+/* V41 — Section 8 width correction
+   Use COLGROUP so colspan headers cannot distort Current / Previous widths. */
+
+#itemSalesTable .item-sales-table{
+  table-layout:fixed !important;
+  min-width:0 !important;
+  max-width:none !important;
+}
+
+/* Explicit physical column widths */
+#itemSalesTable col.item-sales-col-sku{
+  width:130px !important;
+}
+#itemSalesTable col.item-sales-col-item{
+  width:420px !important;
+}
+#itemSalesTable col.item-sales-col-brand{
+  width:125px !important;
+}
+#itemSalesTable col.item-sales-col-sales{
+  width:140px !important;
+}
+#itemSalesTable col.item-sales-col-qty{
+  width:70px !important;
+}
+#itemSalesTable col.item-sales-col-unit{
+  width:82px !important;
+}
+
+/* Remove width pressure from header/cell nth-child rules in older versions. */
+#itemSalesTable .item-sales-table th,
+#itemSalesTable .item-sales-table td{
+  min-width:0 !important;
+  max-width:none !important;
+}
+
+/* Content alignment */
+#itemSalesTable .item-sales-table td:nth-child(2){
+  text-align:left;
+}
+#itemSalesTable .item-sales-table td.num{
+  text-align:right;
+}
+#itemSalesTable .item-sales-table td.unit-code{
+  text-align:center;
+}
+
+/* Keep product names readable without forcing table expansion. */
+#itemSalesTable .item-sales-table td:nth-child(2){
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* Each period group has exactly the same total width:
+   Sales 140 + Qty 70 + Unit_Code 82 = 292 px. */
+#itemSalesTable .item-sales-table thead tr:first-child th[colspan="3"]{
+  text-align:center;
+}
