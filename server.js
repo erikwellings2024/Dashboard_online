@@ -792,6 +792,7 @@ function normalizeRow(r) {
     sku: String(r.new_item_code || r.old_item_code || '').trim(),
     newItemCode: String(r.new_item_code || '').trim(),
     itemName: String(r.item_name || '').trim(),
+    unitCode: String(r.unit_code || '').trim(),
     brand: String(r.brand || '').trim() || 'UNBRANDED',
     rawCategory: String(r.category_2 ?? '').trim().toUpperCase(),
     category: mapCategory(r.category_2),
@@ -1545,8 +1546,33 @@ function storeQuery(sourceRows, periods, filters, metricMode='value') {
     basket:m.basket,
     basketQty:m.basketQty
   }));
-  const ptTotals = ['EFM','EFIT','ESB'].map(pt=>({ pt, periods:metricsByPeriod(base.filter(r=>r.pt===pt && stores.some(s=>s.name===r.store)), periods) }));
-  return { rows, total, variance, avgPerDay, ptTotals, metricMode:metricMode==='qty'?'qty':'value' };
+  const allowedStoreNames=new Set(stores.map(s=>s.name));
+  const scoped=base.filter(r=>allowedStoreNames.has(r.store));
+
+  const ptTotals = ['EFM','EFIT','ESB'].map(pt=>({
+    pt,
+    periods:metricsByPeriod(scoped.filter(r=>r.pt===pt), periods)
+  }));
+
+  const ptBreakdown = ['EFM','EFIT','ESB'].map(pt=>{
+    const rr=scoped.filter(r=>r.pt===pt);
+    return {
+      pt,
+      total:metricsByPeriod(rr,periods),
+      existing:metricsByPeriod(rr.filter(r=>r.storeStat==='Existing Store'),periods),
+      newStore:metricsByPeriod(rr.filter(r=>r.storeStat==='New Store'),periods)
+    };
+  });
+
+  const storeStatTotals={
+    existing:metricsByPeriod(scoped.filter(r=>r.storeStat==='Existing Store'),periods),
+    newStore:metricsByPeriod(scoped.filter(r=>r.storeStat==='New Store'),periods)
+  };
+
+  return {
+    rows,total,variance,avgPerDay,ptTotals,ptBreakdown,storeStatTotals,
+    metricMode:metricMode==='qty'?'qty':'value'
+  };
 }
 
 function groupBy(rows, keyFn) {
@@ -1615,6 +1641,66 @@ function itemQuery(sourceRows, periods, filters, topN, metricMode='value') {
     topGrowth:summarize(topGrowth),
     topDecline:summarize(topDecline),
     totalAll
+  };
+}
+
+
+
+function dominantUnitCode(rows,period){
+  const counts=new Map();
+  for(const r of rows){
+    if(!rowInPeriod(r,period))continue;
+    const code=String(r.unitCode||'').trim();
+    if(!code)continue;
+    counts.set(code,(counts.get(code)||0)+1);
+  }
+  let best='',bestN=0;
+  for(const [code,n] of counts){
+    if(n>bestN){best=code;bestN=n;}
+  }
+  return best;
+}
+
+function itemSalesQuery(sourceRows,periods,filters,topN,metricMode='value'){
+  const base=filterBase(sourceRows,filters);
+  const metricKey=metricMode==='qty'?'qty':'sales';
+  const groups=groupBy(
+    base,
+    r=>`${String(r.newItemCode||r.sku||'').trim()}|||${r.itemName}|||${r.brand}`
+  );
+
+  let rows=[...groups.entries()].map(([key,rr])=>{
+    const [sku,itemName,brand]=key.split('|||');
+    const metrics=metricsByPeriod(rr,periods);
+    return {
+      sku,itemName,brand,
+      periods:metrics.map((m,i)=>({
+        ...m,
+        unitCode:dominantUnitCode(rr,periods[i])
+      }))
+    };
+  });
+
+  rows.sort((a,b)=>
+    safeNum(b.periods[0]?.[metricKey])-safeNum(a.periods[0]?.[metricKey])
+  );
+
+  const shown=rows.slice(0,topN);
+  const totalAll=metricsByPeriod(base,periods);
+  const totalDisplayed=periods.map((_,i)=>({
+    sales:shown.reduce((a,x)=>a+safeNum(x.periods[i]?.sales),0),
+    qty:shown.reduce((a,x)=>a+safeNum(x.periods[i]?.qty),0),
+    trx:0,basket:0,basketQty:0
+  }));
+
+  return {
+    metricMode:metricMode==='qty'?'qty':'value',
+    rows:shown,
+    totalAll,
+    totalDisplayed,
+    displayedShare:totalDisplayed.map((m,i)=>
+      pct(safeNum(m[metricKey]),safeNum(totalAll[i]?.[metricKey]))
+    )
   };
 }
 
@@ -2677,12 +2763,34 @@ app.post('/api/query/items', requireAuth, async (req,res)=>{
     const result=await runHeavyQuery('items',req.body,async()=>{
       const periods=normalizePeriods(req.body.periods);
       const rows=await readRowsForPeriods(periods);
-      const n=Math.max(1,Math.min(20,Number(req.body.topN||config.rankingDefault||10)));
+      const n=Math.max(1,Math.min(25,Number(req.body.topN||config.rankingDefault||10)));
       return itemQuery(rows,periods,req.body.filters||{},n,req.body.metricMode);
     });
     res.json(result);
   }
   catch(e){ res.status(400).json({error:e.message}); }
+});
+
+
+
+app.post('/api/query/item-sales', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('item-sales',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      const n=Math.max(1,Math.min(25,Number(req.body.topN||config.rankingDefault||10)));
+      return itemSalesQuery(
+        rows,
+        periods,
+        req.body.filters||{},
+        n,
+        req.body.metricMode
+      );
+    });
+    res.json(result);
+  }catch(e){
+    res.status(400).json({error:e.message});
+  }
 });
 
 
@@ -2950,4 +3058,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
