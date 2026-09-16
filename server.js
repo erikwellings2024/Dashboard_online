@@ -1611,33 +1611,42 @@ function brandQuery(sourceRows, periods, filters, topN, metricMode='value') {
 function itemQuery(sourceRows, periods, filters, topN, metricMode='value') {
   const base=filterBase(sourceRows,filters);
   const metricKey=metricMode==='qty'?'qty':'sales';
+  const hasP1=periods.length>1;
   const groups=groupBy(base,r=>`${String(r.newItemCode||r.sku||'').trim()}|||${r.itemName}|||${r.brand}`);
   const all=[...groups.entries()].map(([key,rr])=>{
     const [sku,itemName,brand]=key.split('|||');
     const m=metricsByPeriod(rr,periods);
     return {
       sku,itemName,brand,periods:m,
-      growthP1:m[1]?safeNum(m[0][metricKey])-safeNum(m[1][metricKey]):safeNum(m[0][metricKey]),
+      growthP1:m[1]?safeNum(m[0][metricKey])-safeNum(m[1][metricKey]):null,
       growthP2:m[2]?safeNum(m[0][metricKey])-safeNum(m[2][metricKey]):null
     };
   });
-  const topGrowth=[...all].sort((a,b)=>b.growthP1-a.growthP1).slice(0,topN);
-  const topDecline=[...all].sort((a,b)=>a.growthP1-b.growthP1).slice(0,topN);
+
+  const topGrowth=hasP1
+    ? [...all].sort((a,b)=>safeNum(b.growthP1)-safeNum(a.growthP1)).slice(0,topN)
+    : [...all].sort((a,b)=>safeNum(b.periods[0]?.[metricKey])-safeNum(a.periods[0]?.[metricKey])).slice(0,topN);
+
+  const topDecline=hasP1
+    ? [...all].sort((a,b)=>safeNum(a.growthP1)-safeNum(b.growthP1)).slice(0,topN)
+    : [];
+
   const totalAll=metricsByPeriod(base,periods);
   function summarize(list){
     const totalDisplayed=periods.map((_,i)=>({
-      sales:list.reduce((a,x)=>a+safeNum(x.periods[i].sales),0),
-      qty:list.reduce((a,x)=>a+safeNum(x.periods[i].qty),0),
+      sales:list.reduce((a,x)=>a+safeNum(x.periods[i]?.sales),0),
+      qty:list.reduce((a,x)=>a+safeNum(x.periods[i]?.qty),0),
       trx:0,basket:0,basketQty:0
     }));
     return {
       rows:list,
       totalDisplayed,
-      displayedShare:totalDisplayed.map((m,i)=>pct(safeNum(m[metricKey]),safeNum(totalAll[i][metricKey])))
+      displayedShare:totalDisplayed.map((m,i)=>pct(safeNum(m[metricKey]),safeNum(totalAll[i]?.[metricKey])))
     };
   }
   return {
     metricMode:metricMode==='qty'?'qty':'value',
+    currentOnly:!hasP1,
     topGrowth:summarize(topGrowth),
     topDecline:summarize(topDecline),
     totalAll
@@ -1839,7 +1848,7 @@ function publicAutoSyncStatus(){
     metabaseHost:(()=>{try{return new URL(s.baseUrl).host}catch{return ''}})(),
     schedule:'Manual — Admin RUN NOW',
     timezone:'Asia/Jakarta',
-    dateRule:'Tanggal 1 bulan berjalan → tanggal hari ini',
+    dateRule:'Default: bulan berjalan • Manual: 1 bulan',
     sessionReuse:{
       enabled:true,
       persistent:true,
@@ -2018,6 +2027,73 @@ function autoSyncDateRange(){
     startDate:`${t.monthKey}-01`,
     endDate:t.iso,
     targetMonth:t.monthKey
+  };
+}
+
+
+function resolveAutoSyncDateRange(requested){
+  if(!requested || requested.mode!=='manual'){
+    return autoSyncDateRange();
+  }
+
+  const startDate=String(requested.startDate||'').trim();
+  const endDate=String(requested.endDate||'').trim();
+
+  if(!validDate(startDate) || !validDate(endDate)){
+    const e=new Error('MANUAL_PERIOD_INVALID. Start Date and End Date are required.');
+    e.statusCode=400;
+    throw e;
+  }
+  if(startDate>endDate){
+    const e=new Error('MANUAL_PERIOD_INVALID. Start Date cannot be after End Date.');
+    e.statusCode=400;
+    throw e;
+  }
+
+  const startMonth=monthKey(startDate);
+  const endMonth=monthKey(endDate);
+  if(startMonth!==endMonth){
+    const e=new Error('MANUAL_PERIOD_MUST_BE_ONE_MONTH. Select dates inside one calendar month only.');
+    e.statusCode=400;
+    throw e;
+  }
+  if(!monthAllowed(startMonth)){
+    const e=new Error(`AUTO_SYNC_MONTH_OUT_OF_RANGE:${startMonth}`);
+    e.statusCode=400;
+    throw e;
+  }
+
+  const today=jakartaTodayParts();
+  if(startDate>today.iso || endDate>today.iso){
+    const e=new Error(`MANUAL_PERIOD_FUTURE_NOT_ALLOWED. Latest allowed date is ${today.iso}.`);
+    e.statusCode=400;
+    throw e;
+  }
+
+  // Monthly storage is REPLACE-by-month. To protect historical data from
+  // accidental partial replacement, historical manual refreshes must cover
+  // the complete calendar month.
+  if(startDate.slice(8,10)!=='01'){
+    const e=new Error('MANUAL_PERIOD_START_MUST_BE_DAY_1. Monthly storage replaces the whole selected month.');
+    e.statusCode=400;
+    throw e;
+  }
+
+  if(startMonth<today.monthKey){
+    const lastDay=String(daysInMonth(startDate)).padStart(2,'0');
+    const expectedEnd=`${startMonth}-${lastDay}`;
+    if(endDate!==expectedEnd){
+      const e=new Error(`HISTORICAL_MONTH_REQUIRES_FULL_MONTH. Select ${startMonth}-01 through ${expectedEnd} because the selected month will be replaced completely.`);
+      e.statusCode=400;
+      throw e;
+    }
+  }
+
+  return {
+    startDate,
+    endDate,
+    targetMonth:startMonth,
+    manual:true
   };
 }
 
@@ -2469,7 +2545,7 @@ async function finalizeAutomatedMonthReplace(targetMonth,sourceFile,fileSize,str
   return {entry,coverage,replacedRows};
 }
 
-async function runMetabaseAutoSync(trigger='scheduler', schedulerSlotKey=null){
+async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requestedRange=null){
   if(autoSyncStatus.running) {
     const e=new Error('AUTO_SYNC_ALREADY_RUNNING');
     e.statusCode=409;
@@ -2483,12 +2559,12 @@ async function runMetabaseAutoSync(trigger='scheduler', schedulerSlotKey=null){
 
   const settings=metabaseSettings();
   if(!autoSyncConfigured()){
-    const e=new Error('AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME, METABASE_PASSWORD and AUTO_SYNC_SECRET in Railway Variables.');
+    const e=new Error('AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME and METABASE_PASSWORD in Railway Variables.');
     e.statusCode=503;
     throw e;
   }
 
-  const range=autoSyncDateRange();
+  const range=resolveAutoSyncDateRange(requestedRange);
   if(!monthAllowed(range.targetMonth)){
     const e=new Error(`AUTO_SYNC_MONTH_OUT_OF_RANGE:${range.targetMonth}`);
     e.statusCode=400;
@@ -2827,7 +2903,18 @@ app.get('/api/admin/auto-sync/status', requireAdmin, (req,res)=>{
 
 app.post('/api/admin/auto-sync/run', requireAdmin, async (req,res)=>{
   try{
-    const result=await runMetabaseAutoSync(`admin:${req.user.username}`);
+    const mode=String(req.body?.mode||'current').toLowerCase()==='manual'?'manual':'current';
+    const requestedRange=mode==='manual'?{
+      mode:'manual',
+      startDate:String(req.body?.startDate||'').trim(),
+      endDate:String(req.body?.endDate||'').trim()
+    }:null;
+
+    const result=await runMetabaseAutoSync(
+      `admin:${req.user.username}`,
+      null,
+      requestedRange
+    );
     res.json(result);
   }catch(e){
     res.status(e.statusCode||500).json({error:e.message});
@@ -3066,4 +3153,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
