@@ -85,8 +85,18 @@ S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,ME
 }
 
 function rangeControl(section,key,label,period){
+  const hideP1=key==='p1'?`<button class="mini-hide prev1-hide" data-section="${section}" type="button">BLANK / HIDE</button>`:'';
   const hideP2=key==='p2'?`<button class="mini-hide prev2-hide" data-section="${section}" type="button">BLANK / HIDE</button>`:'';
-  return `<div class="field range" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span>${rangeLabel(period)}</span><span>▾</span></button><div class="range-pop"><div class="cal-head"><button class="prev">‹</button><b class="hint">Click start, then end</b><button class="next">›</button></div><div class="months"></div><div class="cal-foot"><span class="selected">${rangeLabel(period)}</span><div class="cal-actions">${hideP2}<button class="clear" type="button">Clear</button></div></div></div></div>`}
+  const today=(key==='p0'||key==='period')?`<button class="mini-today range-today" data-section="${section}" type="button" title="Set to month-to-date using latest available raw sales date">TODAY</button>`:'';
+  return `<div class="field range" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span>${rangeLabel(period)}</span><span>▾</span></button><div class="range-pop"><div class="cal-head"><button class="prev">‹</button><b class="hint">Click start, then end</b><button class="next">›</button></div><div class="months"></div><div class="cal-foot"><span class="selected">${rangeLabel(period)}</span><div class="cal-actions">${today}${hideP1}${hideP2}<button class="clear" type="button">Clear</button></div></div></div></div>`}
+
+function previous1Control(section,period,visible){
+  if(!visible){
+    return `<div class="field previous1-blank"><label>Previous 1</label><button class="control prev1-show" data-section="${section}" type="button"><span>BLANK / HIDDEN</span><span>＋</span></button></div>`;
+  }
+  return rangeControl(section,'p1','Previous 1',period);
+}
+
 function previous2Control(section,period,visible){
   if(!visible){
     return `<div class="field previous2-blank"><label>Previous 2</label><button class="control prev2-show" data-section="${section}" type="button"><span>BLANK / HIDDEN</span><span>＋</span></button></div>`;
@@ -213,7 +223,7 @@ function activeFilterChips(section){
 
 function renderFilters(){
   const p=S.channel.periods;
-  $('#channelFilters').innerHTML=`<div class="filter-grid">${rangeControl('channel','p0','Current Period',p[0])}${rangeControl('channel','p1','Previous 1',p[1])}${previous2Control('channel',p[2],S.channel.prevCount===2)}${multiControl('channel','stores','Store',META.stores,S.channel.filters.stores,true)}${multiControl('channel','categories','Category',META.categories,S.channel.filters.categories,true)}${multiControl('channel','brands','Brand',META.brands,S.channel.filters.brands,true)}${multiControl('channel','salesTypes','Sales Type',META.salesTypes,S.channel.filters.salesTypes)}${multiControl('channel','customerTypes','Customer Type',META.customerTypes||[],S.channel.filters.customerTypes)}${multiControl('channel','storeStats','Store Stat',META.storeStats||[],S.channel.filters.storeStats)}${productPicker('channel','Item (SKU / Name)')}<button class="apply" data-apply="channel">APPLY</button></div><div class="chips"><span class="chip"><b>Section 1 only</b></span>${activeFilterChips('channel')}</div>`;
+  $('#channelFilters').innerHTML=`<div class="filter-grid">${rangeControl('channel','p0','Current Period',p[0])}${previous1Control('channel',p[1],S.channel.prevCount>=1)}${previous2Control('channel',p[2],S.channel.prevCount===2)}${multiControl('channel','stores','Store',META.stores,S.channel.filters.stores,true)}${multiControl('channel','categories','Category',META.categories,S.channel.filters.categories,true)}${multiControl('channel','brands','Brand',META.brands,S.channel.filters.brands,true)}${multiControl('channel','salesTypes','Sales Type',META.salesTypes,S.channel.filters.salesTypes)}${multiControl('channel','customerTypes','Customer Type',META.customerTypes||[],S.channel.filters.customerTypes)}${multiControl('channel','storeStats','Store Stat',META.storeStats||[],S.channel.filters.storeStats)}${productPicker('channel','Item (SKU / Name)')}<button class="apply" data-apply="channel">APPLY</button></div><div class="chips"><span class="chip"><b>Section 1 only</b></span>${activeFilterChips('channel')}</div>`;
 
   const t=S.target;
   // Section 2: Channel and Brand filters intentionally removed.
@@ -224,19 +234,19 @@ function renderFilters(){
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
-  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${rangeControl('store','p1','Previous 1',st.periods[1])}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${activeFilterChips('store')}</div>`;
+  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${previous1Control('store',st.periods[1],st.prevCount>=1)}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${activeFilterChips('store')}</div>`;
 
   const b=S.brand;
-  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${rangeControl('brand','p1','Previous 1',b.periods[1])}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('brand')}</div>`;
+  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${previous1Control('brand',b.periods[1],b.prevCount>=1)}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('brand')}</div>`;
 
   const it=S.item;
-  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${rangeControl('item','p1','Previous 1',it.periods[1])}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
+  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${previous1Control('item',it.periods[1],it.prevCount>=1)}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
 
   const dy=S.daily;
   $('#dailyFilters').innerHTML=`<div class="filter-grid">${rangeControl('daily','period','Current Period',dy.period)}${multiControl('daily','channels','Channel',META.channels,dy.filters.channels,true)}${multiControl('daily','stores','Store',META.stores,dy.filters.stores,true)}${multiControl('daily','categories','Category',META.categories,dy.filters.categories,true)}${multiControl('daily','brands','Brand',META.brands,dy.filters.brands,true)}${multiControl('daily','salesTypes','Sales Type',META.salesTypes,dy.filters.salesTypes)}${multiControl('daily','customerTypes','Customer Type',META.customerTypes||[],dy.filters.customerTypes)}${multiControl('daily','storeStats','Store Stat',META.storeStats||[],dy.filters.storeStats)}${productPicker('daily','Item (SKU / Name)')}<button class="apply" data-apply="daily">APPLY</button></div><div class="chips"><span class="chip"><b>Section 7 only</b></span>${activeFilterChips('daily')}</div>`;
 
   const is=S.itemSales;
-  $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${rangeControl('itemSales','p1','Previous 1',is.periods[1])}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('itemSales')}</div>`;
+  $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${previous1Control('itemSales',is.periods[1],is.prevCount>=1)}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('itemSales')}</div>`;
 
   bindFilters();
 }
@@ -371,6 +381,20 @@ $$('.product-picker').forEach(picker=>{
   };
 
   drop.onclick=e=>e.stopPropagation();
+});
+$$('.prev1-hide').forEach(btn=>btn.onclick=e=>{
+  e.preventDefault();e.stopPropagation();
+  const sec=btn.dataset.section;
+  S[sec].prevCount=0;
+  renderFilters();
+  loadSection(sec);
+});
+$$('.prev1-show').forEach(btn=>btn.onclick=e=>{
+  e.preventDefault();e.stopPropagation();
+  const sec=btn.dataset.section;
+  S[sec].prevCount=Math.max(1,S[sec].prevCount||0);
+  renderFilters();
+  loadSection(sec);
 });
 $$('.prev2-hide').forEach(btn=>btn.onclick=e=>{
   e.preventDefault();e.stopPropagation();
@@ -516,6 +540,36 @@ function setupRange(f){
     view=new Date(view.getFullYear(),view.getMonth()+1,1);
     render();
   };
+  const todayBtn=$('.range-today',f);
+  if(todayBtn)todayBtn.onclick=e=>{
+    e.preventDefault();
+    e.stopPropagation();
+
+    const calendarToday=localISO(new Date());
+    let end=calendarToday;
+    if(META.maxDate && META.maxDate<end)end=META.maxDate;
+
+    const nextPeriod={start:end.slice(0,8)+'01',end};
+    p=nextPeriod;
+
+    if(key==='period'){
+      S[sec].period=nextPeriod;
+      if(sec==='target' || sec==='categoryTarget'){
+        const newMonth=nextPeriod.end.slice(0,7);
+        S[sec].bestEstMonth=newMonth;
+        S[sec].bestEstDays=daysInMonthISO(nextPeriod.end);
+      }
+    }else{
+      const idx=Number(key.slice(1));
+      S[sec].periods[idx]=nextPeriod;
+      if(idx===0)syncLinkedPreviousPeriods(sec);
+    }
+
+    temp=null;
+    renderFilters();
+    loadSection(sec);
+  };
+
   $('.clear',f).onclick=e=>{
     e.stopPropagation();
     temp=null;
@@ -544,12 +598,60 @@ function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
 
 function groupHead(name,p,cls){return `<th colspan="3" class="${cls}">${name}<span class="period-sub">${rangeLabel(p)}</span></th>`}
 
-function renderChannel(d){const ps=periodsFor('channel'),n=ps.length;let h=`<table class="sortable-table chart-table" data-chart-label="0"><thead><tr><th rowspan="2">CHANNEL</th>${groupHead('CURRENT',ps[0],'group-current')}${groupHead('PREVIOUS 1',ps[1],'group-prev1')}${n===3?groupHead('PREVIOUS 2',ps[2],'group-prev2'):''}<th colspan="3" class="group-growth">GROWTH vs P1</th>${n===3?'<th colspan="3" class="group-growth">GROWTH vs P2</th>':''}</tr><tr>${Array.from({length:n},()=>'<th>Sales</th><th>Trx</th><th>Basket Size</th>').join('')}<th>Sales</th><th>Trx</th><th>Basket</th>${n===3?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}</tr></thead><tbody>`;for(const r of d.rows){h+=`<tr><td>${esc(r.channel)}</td>${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}<td class="num ${r.growthP1?.sales>=0?'pos':'neg'}">${fp(r.growthP1?.sales)}</td><td class="num ${r.growthP1?.trx>=0?'pos':'neg'}">${fp(r.growthP1?.trx)}</td><td class="num ${r.growthP1?.basket>=0?'pos':'neg'}">${fp(r.growthP1?.basket)}</td>${n===3?`<td class="num ${r.growthP2?.sales>=0?'pos':'neg'}">${fp(r.growthP2?.sales)}</td><td class="num ${r.growthP2?.trx>=0?'pos':'neg'}">${fp(r.growthP2?.trx)}</td><td class="num ${r.growthP2?.basket>=0?'pos':'neg'}">${fp(r.growthP2?.basket)}</td>`:''}</tr>`}
-const tg1={sales:(d.total[0].sales-d.total[1].sales)/d.total[1].sales,trx:(d.total[0].trx-d.total[1].trx)/d.total[1].trx,basket:(d.total[0].basket-d.total[1].basket)/d.total[1].basket},tg2=n===3?{sales:(d.total[0].sales-d.total[2].sales)/d.total[2].sales,trx:(d.total[0].trx-d.total[2].trx)/d.total[2].trx,basket:(d.total[0].basket-d.total[2].basket)/d.total[2].basket}:null;
-h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td>${d.total.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}<td class="num">${fp(tg1.sales)}</td><td class="num">${fp(tg1.trx)}</td><td class="num">${fp(tg1.basket)}</td>${n===3?`<td class="num">${fp(tg2.sales)}</td><td class="num">${fp(tg2.trx)}</td><td class="num">${fp(tg2.basket)}</td>`:''}</tr>`;
-h+=`<tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td>${d.telemed.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}<td colspan="${n===3?6:3}"></td></tr>`;
-h+=`<tr class="summary-light no-sort-row"><td>% TELEMED</td>${d.telemedPct.map(m=>`<td class="num">${pct(m.sales)}</td><td class="num">${pct(m.trx)}</td><td class="num">${pct(m.basket)}</td>`).join('')}<td colspan="${n===3?6:3}"></td></tr>`;
-let vv='<tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td>',vp='<tr class="no-sort-row"><td class="summary-blue">Variance %</td>';for(let i=0;i<n;i++){const v=d.variance[i];if(v){vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`}else{vv+='<td></td><td></td><td></td>';vp+='<td></td><td></td><td></td>'}}h+=vv+`<td colspan="${n===3?6:3}"></td></tr>`+vp+`<td colspan="${n===3?6:3}"></td></tr></tbody></table>`;$('#channelTable').innerHTML=h;const t=$('#channelTable table');t.dataset.chartCols=n===3?'1,4,7':'1,4';t.dataset.chartSeries=n===3?'Current,Previous 1,Previous 2':'Current,Previous 1';enhanceTable(t)}
+function renderChannel(d){
+  const ps=periodsFor('channel'),n=ps.length;
+  const hasP1=n>=2,hasP2=n>=3;
+
+  let h=`<table class="sortable-table chart-table" data-chart-label="0"><thead><tr><th rowspan="2">CHANNEL</th>${groupHead('CURRENT',ps[0],'group-current')}${hasP1?groupHead('PREVIOUS 1',ps[1],'group-prev1'):''}${hasP2?groupHead('PREVIOUS 2',ps[2],'group-prev2'):''}${hasP1?'<th colspan="3" class="group-growth">GROWTH vs P1</th>':''}${hasP2?'<th colspan="3" class="group-growth">GROWTH vs P2</th>':''}</tr><tr>${Array.from({length:n},()=>'<th>Sales</th><th>Trx</th><th>Basket Size</th>').join('')}${hasP1?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}${hasP2?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}</tr></thead><tbody>`;
+
+  for(const r of d.rows){
+    h+=`<tr><td>${esc(r.channel)}</td>${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?`<td class="num ${r.growthP1?.sales>=0?'pos':'neg'}">${fp(r.growthP1?.sales)}</td><td class="num ${r.growthP1?.trx>=0?'pos':'neg'}">${fp(r.growthP1?.trx)}</td><td class="num ${r.growthP1?.basket>=0?'pos':'neg'}">${fp(r.growthP1?.basket)}</td>`:''}${hasP2?`<td class="num ${r.growthP2?.sales>=0?'pos':'neg'}">${fp(r.growthP2?.sales)}</td><td class="num ${r.growthP2?.trx>=0?'pos':'neg'}">${fp(r.growthP2?.trx)}</td><td class="num ${r.growthP2?.basket>=0?'pos':'neg'}">${fp(r.growthP2?.basket)}</td>`:''}</tr>`;
+  }
+
+  const tg1=hasP1?{
+    sales:growthPct(d.total[0].sales,d.total[1].sales),
+    trx:growthPct(d.total[0].trx,d.total[1].trx),
+    basket:growthPct(d.total[0].basket,d.total[1].basket)
+  }:null;
+  const tg2=hasP2?{
+    sales:growthPct(d.total[0].sales,d.total[2].sales),
+    trx:growthPct(d.total[0].trx,d.total[2].trx),
+    basket:growthPct(d.total[0].basket,d.total[2].basket)
+  }:null;
+
+  h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td>${d.total.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?`<td class="num">${fp(tg1.sales)}</td><td class="num">${fp(tg1.trx)}</td><td class="num">${fp(tg1.basket)}</td>`:''}${hasP2?`<td class="num">${fp(tg2.sales)}</td><td class="num">${fp(tg2.trx)}</td><td class="num">${fp(tg2.basket)}</td>`:''}</tr>`;
+
+  const growthColspan=(hasP1?3:0)+(hasP2?3:0);
+  h+=`<tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td>${d.telemed.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${growthColspan?`<td colspan="${growthColspan}"></td>`:''}</tr>`;
+  h+=`<tr class="summary-light no-sort-row"><td>% TELEMED</td>${d.telemedPct.map(m=>`<td class="num">${pct(m.sales)}</td><td class="num">${pct(m.trx)}</td><td class="num">${pct(m.basket)}</td>`).join('')}${growthColspan?`<td colspan="${growthColspan}"></td>`:''}</tr>`;
+
+  if(hasP1){
+    let vv='<tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td>';
+    let vp='<tr class="no-sort-row"><td class="summary-blue">Variance %</td>';
+    for(let i=0;i<n;i++){
+      const v=d.variance[i];
+      if(v){
+        vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;
+        vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`;
+      }else{
+        vv+='<td></td><td></td><td></td>';
+        vp+='<td></td><td></td><td></td>';
+      }
+    }
+    h+=vv+(growthColspan?`<td colspan="${growthColspan}"></td>`:'')+'</tr>';
+    h+=vp+(growthColspan?`<td colspan="${growthColspan}"></td>`:'')+'</tr>';
+  }
+
+  h+='</tbody></table>';
+  $('#channelTable').innerHTML=h;
+  const t=$('#channelTable table');
+  const cols=[1];
+  if(hasP1)cols.push(4);
+  if(hasP2)cols.push(7);
+  t.dataset.chartCols=cols.join(',');
+  t.dataset.chartSeries=['Current',...(hasP1?['Previous 1']:[]),...(hasP2?['Previous 2']:[])].join(',');
+  enhanceTable(t);
+}
 
 function renderTarget(d){
   const beDays=Number.isFinite(Number(d.bestEstDays))?Number(d.bestEstDays):Number(S.target.bestEstDays||daysInMonthISO(S.target.period.end));
@@ -618,7 +720,7 @@ function renderTargetCategory(d){
 
 
 function renderStore(d){
-  const ps=periodsFor('store'),n=ps.length,order=n===3?[0,1,2]:[0,1];
+  const ps=periodsFor('store'),n=ps.length,order=Array.from({length:n},(_,i)=>i);
   const qtyMode=(d.metricMode||S.store.metricMode)==='qty';
   const primaryKey=qtyMode?'qty':'sales';
   const basketKey=qtyMode?'basketQty':'basket';
@@ -638,23 +740,26 @@ function renderStore(d){
   h+=`<tr class="total no-sort-row"><td colspan="3">ALL STORE</td>${metricCells(d.total)}</tr>`;
 
   const row=(label,cls,fn)=>`<tr class="no-sort-row"><td colspan="3" class="${cls}">${label}</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num ${cls}">${fn(i,metric)}</td>`).join('')).join('')}</tr>`;
-  h+=row('Variance Value','summary-blue-label',(i,metric)=>{
-    const v=d.variance[i];if(!v)return '';
-    const k=metric===0?primaryKey:metric===1?'trx':basketKey;
-    return fmt(v[k]);
-  });
-  h+=row('Variance %','summary-blue',(i,metric)=>{
-    const v=d.variance[i];if(!v)return '';
-    const k=metric===0?(qtyMode?'qtyPct':'salesPct'):metric===1?'trxPct':(qtyMode?'basketQtyPct':'basketPct');
-    return fp(v[k]);
-  });
+
+  if(n>1){
+    h+=row('Variance Value','summary-blue-label',(i,metric)=>{
+      const v=d.variance[i];if(!v)return '';
+      const k=metric===0?primaryKey:metric===1?'trx':basketKey;
+      return fmt(v[k]);
+    });
+    h+=row('Variance %','summary-blue',(i,metric)=>{
+      const v=d.variance[i];if(!v)return '';
+      const k=metric===0?(qtyMode?'qtyPct':'salesPct'):metric===1?'trxPct':(qtyMode?'basketQtyPct':'basketPct');
+      return fp(v[k]);
+    });
+  }
+
   h+=row('Avg Per Day','store-avg-row',(i,metric)=>{
     const m=d.avgPerDay[i]||{};
     const k=metric===0?primaryKey:metric===1?'trx':basketKey;
     return fmt(m[k]);
   });
 
-  // PT summary section. Existing/New rows are collapsed by default.
   for(const pt of (d.ptBreakdown||[])){
     h+=`<tr class="no-sort-row pt-detail-row" data-pt="${esc(pt.pt)}"><td></td><td>${esc(pt.pt)}</td><td>Exist Store</td>${metricCells(pt.existing)}</tr>`;
     h+=`<tr class="no-sort-row pt-detail-row" data-pt="${esc(pt.pt)}"><td></td><td>${esc(pt.pt)}</td><td>New Store</td>${metricCells(pt.newStore)}</tr>`;
@@ -668,8 +773,8 @@ function renderStore(d){
 
   $('#storeTable').innerHTML=h;
   const t=$('#storeTable table');
-  t.dataset.chartCols=n===3?'3,4,5':'3,4';
-  t.dataset.chartSeries=n===3?'Current,Previous 1,Previous 2':'Current,Previous 1';
+  t.dataset.chartCols=order.map(i=>3+i).join(',');
+  t.dataset.chartSeries=order.map(i=>i===0?'Current':`Previous ${i}`).join(',');
   enhanceTable(t);
 
   $$('.pt-expand-btn',t).forEach(btn=>{
@@ -684,11 +789,10 @@ function renderStore(d){
   });
 }
 
-
 function summaryRankRows(displayed,allv,share,n,labelSpan){
   const vals=a=>a.slice(0,n).map(x=>`<td class="num">${fmt(x.sales)}</td>`).join('');
   const p=a=>a.slice(0,n).map(x=>`<td class="num">${pct(x)}</td>`).join('');
-  const extra=n===3?3:2;
+  const extra=Math.max(1,n);
   return `<tr class="rank-summary no-sort-row"><td colspan="2">TOTAL SALES DISPLAYED</td>${vals(displayed)}<td colspan="${extra}"></td></tr><tr class="rank-summary total-all no-sort-row"><td colspan="2">TOTAL ALL SALES</td>${vals(allv)}<td colspan="${extra}"></td></tr><tr class="rank-summary percent no-sort-row"><td colspan="2">% OF TOTAL</td>${p(share)}<td colspan="${extra}"></td></tr>`;
 }
 
@@ -697,18 +801,27 @@ function renderBrand(d){
   const qtyMode=(d.metricMode||S.brand.metricMode)==='qty';
   const metricKey=qtyMode?'qty':'sales';
   const metricLabel=qtyMode?'Qty':'Sales';
-  let h=`<table class="sortable-table chart-table" data-chart-label="1" data-chart-cols="2,3${n===3?',4':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead><tr><th>Rank</th><th>BRAND</th><th>Current ${metricLabel}<span class="period-sub">${rangeLabel(ps[0])}</span></th><th>Previous 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>${n===3?`<th>Previous 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}<th>Growth vs P1</th>${n===3?'<th>Growth vs P2</th>':''}<th>% of All ${metricLabel}</th></tr></thead><tbody>`;
-  d.rows.forEach((r,i)=>h+=`<tr><td class="center">${i+1}</td><td>${esc(r.brand)}</td><td class="num">${fmt(r.periods[0][metricKey])}</td><td class="num">${fmt(r.periods[1][metricKey])}</td>${n===3?`<td class="num">${fmt(r.periods[2][metricKey])}</td>`:''}<td class="num ${r.growthP1>=0?'pos':'neg'}">${fmt(r.growthP1)}</td>${n===3?`<td class="num ${r.growthP2>=0?'pos':'neg'}">${fmt(r.growthP2)}</td>`:''}<td class="num">${pct(r.share)}</td></tr>`);
+  const hasP1=n>=2,hasP2=n>=3;
+
+  const chartCols=[2,...(hasP1?[3]:[]),...(hasP2?[4]:[])].join(',');
+  const chartSeries=['Current',...(hasP1?['Previous 1']:[]),...(hasP2?['Previous 2']:[])].join(',');
+
+  let h=`<table class="sortable-table chart-table" data-chart-label="1" data-chart-cols="${chartCols}" data-chart-series="${chartSeries}"><thead><tr><th>Rank</th><th>BRAND</th><th>Current ${metricLabel}<span class="period-sub">${rangeLabel(ps[0])}</span></th>${hasP1?`<th>Previous 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>`:''}${hasP2?`<th>Previous 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}${hasP1?'<th>Growth vs P1</th>':''}${hasP2?'<th>Growth vs P2</th>':''}<th>% of All ${metricLabel}</th></tr></thead><tbody>`;
+
+  d.rows.forEach((r,i)=>{
+    h+=`<tr><td class="center">${i+1}</td><td>${esc(r.brand)}</td><td class="num">${fmt(r.periods[0][metricKey])}</td>${hasP1?`<td class="num">${fmt(r.periods[1][metricKey])}</td>`:''}${hasP2?`<td class="num">${fmt(r.periods[2][metricKey])}</td>`:''}${hasP1?`<td class="num ${r.growthP1>=0?'pos':'neg'}">${fmt(r.growthP1)}</td>`:''}${hasP2?`<td class="num ${r.growthP2>=0?'pos':'neg'}">${fmt(r.growthP2)}</td>`:''}<td class="num">${pct(r.share)}</td></tr>`;
+  });
+
   const td=d.totalDisplayed.map(x=>({sales:x[metricKey]}));
   const ta=d.totalAll.map(x=>({sales:x[metricKey]}));
-  h+=summaryRankRows(td,ta,d.displayedShare,n,n===3?2:2)
+  h+=summaryRankRows(td,ta,d.displayedShare,n,n)
     .replace(/TOTAL SALES DISPLAYED/g,`TOTAL ${qtyMode?'QTY':'SALES'} DISPLAYED`)
     .replace(/TOTAL ALL SALES/g,`TOTAL ALL ${qtyMode?'QTY':'SALES'}`)
     +`</tbody></table>`;
+
   $('#brandTable').innerHTML=h;
   enhanceTable($('#brandTable table'));
 }
-
 
 function growthPct(cur,prev){
   const c=Number(cur||0),p=Number(prev||0);
@@ -721,19 +834,34 @@ function itemTable(title,boxClass,obj,totalAll,ps,metricMode){
   const metricKey=qtyMode?'qty':'sales';
   const metricLabel=qtyMode?'Qty':'Sales';
   const growthLabel=qtyMode?'Growth Qty':'Growth Value';
-  let h=`<div class="rank-box ${boxClass}"><h3>${title}</h3><table class="sortable-table chart-table" data-chart-label="2" data-chart-cols="4,5${n===3?',6':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}"><thead><tr><th>Rank</th><th>SKU</th><th>Item</th><th>Brand</th><th>Current ${metricLabel}<span class="period-sub">${rangeLabel(ps[0])}</span></th><th>Previous 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>${n===3?`<th>Previous 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}<th>${growthLabel} vs P1</th><th>Growth % vs P1</th>${n===3?`<th>${growthLabel} vs P2</th><th>Growth % vs P2</th>`:''}</tr></thead><tbody>`;
+  const hasP1=n>=2,hasP2=n>=3;
+
+  const chartCols=[4,...(hasP1?[5]:[]),...(hasP2?[6]:[])].join(',');
+  const chartSeries=['Current',...(hasP1?['Previous 1']:[]),...(hasP2?['Previous 2']:[])].join(',');
+
+  let h=`<div class="rank-box ${boxClass}"><h3>${title}</h3><table class="sortable-table chart-table" data-chart-label="2" data-chart-cols="${chartCols}" data-chart-series="${chartSeries}"><thead><tr><th>Rank</th><th>SKU</th><th>Item</th><th>Brand</th><th>Current ${metricLabel}<span class="period-sub">${rangeLabel(ps[0])}</span></th>${hasP1?`<th>Previous 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>`:''}${hasP2?`<th>Previous 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}${hasP1?`<th>${growthLabel} vs P1</th><th>Growth % vs P1</th>`:''}${hasP2?`<th>${growthLabel} vs P2</th><th>Growth % vs P2</th>`:''}</tr></thead><tbody>`;
+
   obj.rows.forEach((r,i)=>{
     const cur=r.periods[0]?.[metricKey],p1=r.periods[1]?.[metricKey],p2=r.periods[2]?.[metricKey];
-    const gp1=growthPct(cur,p1),gp2=n===3?growthPct(cur,p2):null;
-    h+=`<tr><td class="center">${i+1}</td><td>${esc(r.sku)}</td><td>${esc(r.itemName)}</td><td>${esc(r.brand)}</td><td class="num">${fmt(cur)}</td><td class="num">${fmt(p1)}</td>${n===3?`<td class="num">${fmt(p2)}</td>`:''}<td class="num ${r.growthP1>=0?'pos':'neg'}">${fmt(r.growthP1)}</td><td class="num ${gp1===null?'':gp1>=0?'pos':'neg'}">${fp(gp1)}</td>${n===3?`<td class="num ${r.growthP2>=0?'pos':'neg'}">${fmt(r.growthP2)}</td><td class="num ${gp2===null?'':gp2>=0?'pos':'neg'}">${fp(gp2)}</td>`:''}</tr>`;
+    const gp1=hasP1?growthPct(cur,p1):null,gp2=hasP2?growthPct(cur,p2):null;
+    h+=`<tr><td class="center">${i+1}</td><td>${esc(r.sku)}</td><td>${esc(r.itemName)}</td><td>${esc(r.brand)}</td><td class="num">${fmt(cur)}</td>${hasP1?`<td class="num">${fmt(p1)}</td><td class="num ${r.growthP1>=0?'pos':'neg'}">${fmt(r.growthP1)}</td><td class="num ${gp1===null?'':gp1>=0?'pos':'neg'}">${fp(gp1)}</td>`:''}${hasP2?`<td class="num">${fmt(p2)}</td><td class="num ${r.growthP2>=0?'pos':'neg'}">${fmt(r.growthP2)}</td><td class="num ${gp2===null?'':gp2>=0?'pos':'neg'}">${fp(gp2)}</td>`:''}</tr>`;
   });
-  const extra=n===3?4:2;
-  h+=`<tr class="rank-summary no-sort-row"><td colspan="4">TOTAL ${qtyMode?'QTY':'SALES'} DISPLAYED</td>${obj.totalDisplayed.slice(0,n).map(x=>`<td class="num">${fmt(x[metricKey])}</td>`).join('')}<td colspan="${extra}"></td></tr><tr class="rank-summary total-all no-sort-row"><td colspan="4">TOTAL ALL ${qtyMode?'QTY':'SALES'}</td>${totalAll.slice(0,n).map(x=>`<td class="num">${fmt(x[metricKey])}</td>`).join('')}<td colspan="${extra}"></td></tr><tr class="rank-summary percent no-sort-row"><td colspan="4">% OF TOTAL</td>${obj.displayedShare.slice(0,n).map(x=>`<td class="num">${pct(x)}</td>`).join('')}<td colspan="${extra}"></td></tr></tbody></table></div>`;
+
+  const extra=Math.max(0,2*(n-1));
+  h+=`<tr class="rank-summary no-sort-row"><td colspan="4">TOTAL ${qtyMode?'QTY':'SALES'} DISPLAYED</td>${obj.totalDisplayed.slice(0,n).map(x=>`<td class="num">${fmt(x[metricKey])}</td>`).join('')}${extra?`<td colspan="${extra}"></td>`:''}</tr>`;
+  h+=`<tr class="rank-summary total-all no-sort-row"><td colspan="4">TOTAL ALL ${qtyMode?'QTY':'SALES'}</td>${totalAll.slice(0,n).map(x=>`<td class="num">${fmt(x[metricKey])}</td>`).join('')}${extra?`<td colspan="${extra}"></td>`:''}</tr>`;
+  h+=`<tr class="rank-summary percent no-sort-row"><td colspan="4">% OF TOTAL</td>${obj.displayedShare.slice(0,n).map(x=>`<td class="num">${pct(x)}</td>`).join('')}${extra?`<td colspan="${extra}"></td>`:''}</tr></tbody></table></div>`;
   return h;
 }
+
 function renderItems(d){
   const ps=periodsFor('item'),mode=d.metricMode||S.item.metricMode,label=mode==='qty'?'Qty':'Value';
-  $('#itemTable').innerHTML=`<div class="rank-grid">${itemTable(`Highest Sales Growth by ${label}`,'up',d.topGrowth,d.totalAll,ps,mode)}${itemTable(`Highest Sales Decline by ${label}`,'down',d.topDecline,d.totalAll,ps,mode)}</div>`;
+
+  if(ps.length===1 || d.currentOnly){
+    $('#itemTable').innerHTML=`<div class="rank-grid">${itemTable(`Current Sales by ${label} — Previous 1 hidden`,'up',d.topGrowth,d.totalAll,ps,mode)}</div>`;
+  }else{
+    $('#itemTable').innerHTML=`<div class="rank-grid">${itemTable(`Highest Sales Growth by ${label}`,'up',d.topGrowth,d.totalAll,ps,mode)}${itemTable(`Highest Sales Decline by ${label}`,'down',d.topDecline,d.totalAll,ps,mode)}</div>`;
+  }
   $$('#itemTable table').forEach(enhanceTable);
 }
 
@@ -782,10 +910,8 @@ function renderItemSales(d){
   const n=ps.length;
   const mode=d.metricMode||S.itemSales.metricMode;
   const summaryLabel=mode==='qty'?'QTY':'SALES';
+  const hasP1=n>=2,hasP2=n>=3;
 
-  // data-chart-cols uses zero-based table column indexes:
-  // SKU=0, Item=1, Brand=2,
-  // Current Sales=3, P1 Sales=6, P2 Sales=9.
   const tableWidth=130+420+125+n*(140+70+82);
   const periodCols=Array.from({length:n},()=>`
     <col class="item-sales-col-sales">
@@ -793,7 +919,10 @@ function renderItemSales(d){
     <col class="item-sales-col-unit">
   `).join('');
 
-  let h=`<table class="sortable-table chart-table item-sales-table" style="--item-sales-table-width:${tableWidth}px" data-chart-label="1" data-chart-cols="3,6${n===3?',9':''}" data-chart-series="Current,Previous 1${n===3?',Previous 2':''}">
+  const chartCols=[3,...(hasP1?[6]:[]),...(hasP2?[9]:[])].join(',');
+  const chartSeries=['Current',...(hasP1?['Previous 1']:[]),...(hasP2?['Previous 2']:[])].join(',');
+
+  let h=`<table class="sortable-table chart-table item-sales-table" style="--item-sales-table-width:${tableWidth}px" data-chart-label="1" data-chart-cols="${chartCols}" data-chart-series="${chartSeries}">
     <colgroup>
       <col class="item-sales-col-sku">
       <col class="item-sales-col-item">
@@ -806,8 +935,8 @@ function renderItemSales(d){
       <th rowspan="2">Item</th>
       <th rowspan="2">Brand</th>
       <th colspan="3">CURRENT SALES<span class="period-sub">${rangeLabel(ps[0])}</span></th>
-      <th colspan="3">PREVIOUS 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>
-      ${n===3?`<th colspan="3">PREVIOUS 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}
+      ${hasP1?`<th colspan="3">PREVIOUS 1<span class="period-sub">${rangeLabel(ps[1])}</span></th>`:''}
+      ${hasP2?`<th colspan="3">PREVIOUS 2<span class="period-sub">${rangeLabel(ps[2])}</span></th>`:''}
     </tr>
     <tr>
       ${Array.from({length:n},()=>'<th>Sales</th><th>Qty</th><th>Unit_Code</th>').join('')}
@@ -844,7 +973,6 @@ function renderItemSales(d){
   $('#itemSalesTable').innerHTML=h;
   enhanceTable($('#itemSalesTable table'));
 }
-
 
 function enhanceTable(table){addSort(table)}
 
@@ -957,7 +1085,105 @@ function sortRows(table,col,clickedHeader){
 $$('.download-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();b.parentElement.classList.toggle('open')});
 $$('[data-export]').forEach(b=>b.onclick=()=>{const sec=b.closest('.export-section');b.closest('.download-wrap').classList.remove('open');b.dataset.export==='excel'?exportExcel(sec):exportJpeg(sec)});
 function tableArea(sec){return $('.rank-grid',sec)||$('.table-wrap',sec)}
-async function exportJpeg(sec){if(!window.html2canvas)return alert('JPEG library unavailable');const area=tableArea(sec);const clone=area.cloneNode(true);$$('.sort-mark',clone).forEach(x=>x.remove());const stage=document.createElement('div');stage.style.cssText='position:fixed;left:-100000px;top:0;background:#fff;padding:10px;width:max-content';stage.appendChild(clone);document.body.appendChild(stage);const canvas=await html2canvas(stage,{backgroundColor:'#fff',scale:2,width:stage.scrollWidth,height:stage.scrollHeight,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});stage.remove();const a=document.createElement('a');a.download=safeName($('h2',sec).textContent)+'.jpeg';a.href=canvas.toDataURL('image/jpeg',.95);a.click()}
+function jpegFilterPairs(sec){
+  const pairs=[];
+
+  const metric=$('.metric-select',sec);
+  if(metric){
+    pairs.push(['Mode',metric.options[metric.selectedIndex]?.textContent||metric.value]);
+  }
+
+  $$('.section-filter .field',sec).forEach(field=>{
+    const label=($('label',field)?.textContent||'').replace(/\s+/g,' ').trim();
+    if(!label)return;
+
+    let value='';
+    if(field.classList.contains('range')){
+      value=($('.control span',field)?.textContent||'').trim();
+    }else if(field.classList.contains('previous1-blank') || field.classList.contains('previous2-blank')){
+      value='BLANK / HIDDEN';
+    }else if(field.classList.contains('multi')){
+      const inputs=$$('.option input',field);
+      const checked=inputs.filter(x=>x.checked).map(x=>x.value);
+      value=checked.length===inputs.length?`All ${label}`:checked.join(', ');
+      if(!value)value='None';
+    }else if(field.classList.contains('product-picker')){
+      value=$('.product-input',field)?.value.trim()||'All Item';
+    }else{
+      const select=$('select',field);
+      const input=$('input',field);
+      if(select)value=select.options[select.selectedIndex]?.textContent||select.value;
+      else if(input)value=input.value;
+    }
+
+    if(value)pairs.push([label,value]);
+  });
+
+  // Include context chips such as Time Factor, but skip "Section X only".
+  $$('.section-filter .chips .chip',sec).forEach(chip=>{
+    const text=chip.textContent.replace(/\s+/g,' ').trim();
+    if(text && !/^Section\s+\d+\s+only$/i.test(text)){
+      pairs.push(['Info',text]);
+    }
+  });
+
+  return pairs;
+}
+
+async function exportJpeg(sec){
+  if(!window.html2canvas)return alert('JPEG library unavailable');
+
+  const area=tableArea(sec);
+  const clone=area.cloneNode(true);
+  $$('.sort-mark',clone).forEach(x=>x.remove());
+
+  clone.style.overflow='visible';
+
+  const header=document.createElement('div');
+  header.className='jpeg-report-header';
+
+  const no=$('.section-no',sec)?.textContent?.trim()||'';
+  const title=$('h2',sec)?.textContent?.trim()||'Report';
+  const subtitle=$('.section-title p',sec)?.textContent?.trim()||'';
+  const pairs=jpegFilterPairs(sec);
+
+  header.innerHTML=`
+    <div class="jpeg-report-title">${no?`<span class="jpeg-section-no">${esc(no)}</span>`:''}<div><h2>${esc(title)}</h2>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div></div>
+    <div class="jpeg-filter-summary">
+      ${pairs.map(([k,v])=>`<span class="jpeg-filter-chip"><b>${esc(k)}:</b> ${esc(v)}</span>`).join('')}
+    </div>`;
+
+  const stage=document.createElement('div');
+  stage.className='jpeg-export-stage';
+  stage.style.cssText='position:fixed;left:-100000px;top:0;background:#fff;padding:14px;width:max-content;z-index:-1';
+  stage.appendChild(header);
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
+
+  const reportWidth=Math.max(
+    900,
+    area.scrollWidth||0,
+    clone.scrollWidth||0,
+    area.getBoundingClientRect().width||0
+  );
+  header.style.width=reportWidth+'px';
+
+  const canvas=await html2canvas(stage,{
+    backgroundColor:'#fff',
+    scale:2,
+    width:stage.scrollWidth,
+    height:stage.scrollHeight,
+    windowWidth:stage.scrollWidth,
+    windowHeight:stage.scrollHeight
+  });
+
+  stage.remove();
+
+  const a=document.createElement('a');
+  a.download=safeName(title)+'.jpeg';
+  a.href=canvas.toDataURL('image/jpeg',.95);
+  a.click();
+}
 function safeName(s){return s.replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'').toLowerCase()}
 function excelCellText(td){
   const clone=td.cloneNode(true);
@@ -1214,7 +1440,9 @@ function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.le
 
 
 function normalUpdateHeaderText(){
-  const rawDate=META?.maxDate?parseISO(META.maxDate):null;
+  const upload=META.runtime?.lastUpload||{};
+  const headerDateISO=upload.detectedEnd||META?.maxDate||null;
+  const rawDate=headerDateISO?parseISO(headerDateISO):null;
   if(!rawDate)return 'NO RAW DATA';
 
   const updateAt=META.runtime?.updatedAt?new Date(META.runtime.updatedAt):null;
@@ -1224,7 +1452,6 @@ function normalUpdateHeaderText(){
       }).replace('.',':')
     :'--:--';
 
-  const upload=META.runtime?.lastUpload||{};
   let source='manual update';
 
   if(upload.mode==='metabase_auto_sync'){

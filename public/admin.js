@@ -152,14 +152,85 @@ $('#refreshAutoSync').onclick=async()=>{
   try{await loadAutoSyncStatus();msg('#autoSyncMsg','Status refreshed.')}
   catch(e){msg('#autoSyncMsg',e.message,false)}
 };
+
+function syncPeriodMode(){
+  return document.querySelector('input[name="autoSyncPeriodMode"]:checked')?.value||'current';
+}
+
+function dateOnlyLocal(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function initAutoSyncPeriodControls(){
+  const todayText=META?.uploadPolicy?.today||dateOnlyLocal(new Date());
+  const today=new Date(todayText+'T00:00:00');
+  const prevStart=new Date(today.getFullYear(),today.getMonth()-1,1);
+  const prevEnd=new Date(today.getFullYear(),today.getMonth(),0);
+
+  const start=$('#autoSyncStartDate');
+  const end=$('#autoSyncEndDate');
+  if(start && !start.value)start.value=dateOnlyLocal(prevStart);
+  if(end && !end.value)end.value=dateOnlyLocal(prevEnd);
+
+  if(start){start.min='2026-01-01';start.max=todayText}
+  if(end){end.min='2026-01-01';end.max=todayText}
+
+  $$('input[name="autoSyncPeriodMode"]').forEach(r=>r.onchange=()=>{
+    const manual=syncPeriodMode()==='manual';
+    $('#autoSyncManualRange').classList.toggle('hidden',!manual);
+    const rule=$('#autoSyncDateRule');
+    if(rule)rule.textContent=manual?'Manual: 1 bulan • Replace month':'Default: bulan berjalan';
+  });
+}
+
+function selectedAutoSyncRequest(){
+  const mode=syncPeriodMode();
+  if(mode!=='manual')return {mode:'current'};
+
+  const startDate=$('#autoSyncStartDate').value;
+  const endDate=$('#autoSyncEndDate').value;
+  if(!startDate || !endDate)throw new Error('Pilih Start Date dan End Date.');
+
+  return {mode:'manual',startDate,endDate};
+}
+
 $('#runAutoSync').onclick=async()=>{
   const b=$('#runAutoSync');
-  if(!confirm('Jalankan Update Sales dari Metabase sekarang? Data bulan berjalan akan di-replace dari tanggal 1 sampai hari ini.'))return;
+
+  let request;
+  try{
+    request=selectedAutoSyncRequest();
+  }catch(e){
+    return msg('#autoSyncMsg',e.message,false);
+  }
+
+  let confirmText='';
+  if(request.mode==='manual'){
+    const targetMonth=request.startDate.slice(0,7);
+    confirmText=
+      `Update Sales Metabase periode ${request.startDate} → ${request.endDate}?\n\n`+
+      `PERHATIAN: data folder ${targetMonth} yang sudah ada akan DIREPLACE seluruhnya oleh hasil update ini.`;
+  }else{
+    confirmText='Jalankan Update Sales bulan berjalan dari tanggal 1 sampai hari ini? Data bulan berjalan akan direplace dengan hasil terbaru.';
+  }
+
+  if(!confirm(confirmText))return;
+
   try{
     b.disabled=true;b.textContent='SYNCING...';
     msg('#autoSyncMsg','Update Metabase sedang berjalan. Jangan upload manual sampai proses selesai.');
-    const r=await api('/api/admin/auto-sync/run',{method:'POST',body:'{}'});
-    msg('#autoSyncMsg',`SUCCESS • ${r.startDate} → ${r.endDate} • ${Number(r.rows||0).toLocaleString('id-ID')} rows`);
+
+    const r=await api('/api/admin/auto-sync/run',{
+      method:'POST',
+      body:JSON.stringify(request)
+    });
+
+    msg(
+      '#autoSyncMsg',
+      `SUCCESS • folder ${r.targetMonth} • ${r.startDate} → ${r.endDate} • `+
+      `${Number(r.rows||0).toLocaleString('id-ID')} rows • ${Number(r.replacedRows||0).toLocaleString('id-ID')} previous rows replaced`
+    );
+
     META=await api('/api/meta');
     renderRuntime();
     renderMonthStorage();
@@ -327,6 +398,7 @@ async function boot(){
   renderUploadPolicy();
   renderMonthStorage();
   renderUploadHistory();
+  initAutoSyncPeriodControls();
   await loadAutoSyncStatus();
   await loadUsers();
 }

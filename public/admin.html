@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20260913-27"></head>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20260916-45"></head>
 <body>
 <header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT/Store Stat, target online/category, mapping category, auto update sales, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
 <main class="admin-page">
@@ -70,15 +70,42 @@
   <h2>Update Sales dari Metabase</h2>
   <p>
     Update sales dari Metabase Question 364 dijalankan <b>manual oleh Admin melalui tombol RUN NOW</b>.
-    Rentang tanggal otomatis menggunakan <b>tanggal 1 bulan berjalan sampai tanggal hari ini</b>
-    berdasarkan zona waktu <b>Asia/Jakarta</b>. Tidak ada scheduler otomatis.
+    Pilih <b>Bulan Berjalan</b> untuk update normal tanggal 1 sampai hari ini, atau <b>Periode Manual</b>
+    untuk mengganti data satu bulan tertentu. Tidak ada scheduler otomatis.
   </p>
+
+  <div class="sync-period-box">
+    <div class="sync-period-title">PERIODE SALES YANG AKAN DIUPDATE</div>
+    <label class="sync-period-option">
+      <input type="radio" name="autoSyncPeriodMode" value="current" checked>
+      <span><b>1. Bulan Berjalan (Default)</b><small>Tanggal 1 bulan berjalan → tanggal hari ini</small></span>
+    </label>
+    <label class="sync-period-option">
+      <input type="radio" name="autoSyncPeriodMode" value="manual">
+      <span><b>2. Periode Manual</b><small>Pilih periode dalam satu bulan untuk update bulan sebelumnya</small></span>
+    </label>
+
+    <div id="autoSyncManualRange" class="sync-manual-range hidden">
+      <div>
+        <label>Start Date</label>
+        <input id="autoSyncStartDate" type="date">
+      </div>
+      <div>
+        <label>End Date</label>
+        <input id="autoSyncEndDate" type="date">
+      </div>
+      <div class="sync-replace-warning">
+        <b>REPLACE MONTH:</b> data hasil Metabase akan mengganti seluruh data folder bulan yang dipilih.
+        Untuk bulan lampau, pilih tanggal 1 sampai tanggal terakhir bulan.
+      </div>
+    </div>
+  </div>
 
   <div class="auto-sync-grid">
     <div class="auto-sync-card"><span>Configuration</span><b id="autoSyncConfigured">-</b></div>
     <div class="auto-sync-card"><span>Source</span><b id="autoSyncSource">-</b></div>
     <div class="auto-sync-card"><span>Update Mode</span><b id="autoSyncSchedule">Manual • RUN NOW</b></div>
-    <div class="auto-sync-card"><span>Date Rule</span><b id="autoSyncDateRule">Tanggal 1 → Hari Ini</b></div>
+    <div class="auto-sync-card"><span>Date Rule</span><b id="autoSyncDateRule">Default: Bulan Berjalan</b></div>
     <div class="auto-sync-card"><span>Last Result</span><b id="autoSyncResult">-</b></div>
     <div class="auto-sync-card"><span>Last Run</span><b id="autoSyncLastRun">-</b></div>
     <div class="auto-sync-card"><span>Data Range</span><b id="autoSyncRange">-</b></div>
@@ -102,4 +129,4 @@
 </div>
 </section>
 <section class="admin-panel" id="tab-users"><div class="admin-box"><h2>User Management</h2><p>Admin dapat membuat akun Admin/Guest, reset password, ubah role, aktif/nonaktifkan, dan menghapus user. Guest tidak memiliki akses ke halaman ini.</p><div class="form-row"><div><label>Username</label><input id="newUsername"></div><div><label>Display Name</label><input id="newDisplayName"></div><div><label>Password</label><input id="newPassword" type="password"></div><div><label>Role</label><select id="newRole"><option value="guest">Guest</option><option value="admin">Admin</option></select></div><div><button class="btn green" id="addUser">Add User</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="userTable"><thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Active</th><th>New Password</th><th>Action</th></tr></thead><tbody></tbody></table></div><div id="userMsg"></div></div></section>
-</main><script src="/admin.js?v=20260914-36"></script></body></html>
+</main><script src="/admin.js?v=20260916-45"></script></body></html>
