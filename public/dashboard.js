@@ -87,7 +87,7 @@ S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,ME
 function rangeControl(section,key,label,period){
   const hideP1=key==='p1'?`<button class="mini-hide prev1-hide" data-section="${section}" type="button">BLANK / HIDE</button>`:'';
   const hideP2=key==='p2'?`<button class="mini-hide prev2-hide" data-section="${section}" type="button">BLANK / HIDE</button>`:'';
-  const today=(key==='p0'||key==='period')?`<button class="mini-today range-today" data-section="${section}" type="button" title="Set to month-to-date using latest available raw sales date">TODAY</button>`:'';
+  const today=(key==='p0'||key==='period')?`<button class="mini-today range-today" data-section="${section}" type="button" title="Set Current Period to one day: latest available sales date">TODAY</button>`:'';
   return `<div class="field range" data-section="${section}" data-key="${key}"><label>${label}</label><button class="control" type="button"><span>${rangeLabel(period)}</span><span>▾</span></button><div class="range-pop"><div class="cal-head"><button class="prev">‹</button><b class="hint">Click start, then end</b><button class="next">›</button></div><div class="months"></div><div class="cal-foot"><span class="selected">${rangeLabel(period)}</span><div class="cal-actions">${today}${hideP1}${hideP2}<button class="clear" type="button">Clear</button></div></div></div></div>`}
 
 function previous1Control(section,period,visible){
@@ -549,7 +549,9 @@ function setupRange(f){
     let end=calendarToday;
     if(META.maxDate && META.maxDate<end)end=META.maxDate;
 
-    const nextPeriod={start:end.slice(0,8)+'01',end};
+    // TODAY means one single sales day, not month-to-date.
+    // Use the latest available raw-sales date when today's raw data is not yet available.
+    const nextPeriod={start:end,end};
     p=nextPeriod;
 
     if(key==='period'){
