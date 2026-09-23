@@ -1,6 +1,28 @@
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});if(r.status===401){location.href='/login.html';throw new Error('Unauthorized')}if(r.status===403){location.href='/dashboard.html';throw new Error('Forbidden')}const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d};
+const api=async(url,opts={})=>{
+  const {headers:optHeaders,...rest}=opts;
+  const r=await fetch(url,{
+    cache:'no-store',
+    ...rest,
+    headers:{'Content-Type':'application/json',...(optHeaders||{})}
+  });
+  if(r.status===401){location.href='/login.html';throw new Error('Unauthorized')}
+  if(r.status===403){location.href='/dashboard.html';throw new Error('Forbidden')}
+
+  const text=await r.text();
+  let d={};
+  if(text){
+    try{d=JSON.parse(text)}
+    catch{
+      const preview=text.trim().slice(0,300)||r.statusText||'non-JSON response';
+      if(!r.ok)throw new Error(`Server error ${r.status}: ${preview}`);
+      throw new Error(`Server returned invalid JSON: ${preview}`);
+    }
+  }
+  if(!r.ok)throw new Error(d.error||d.message||`Request failed (${r.status})`);
+  return d;
+};
 let CFG=null,USERS=[],ME=null,META=null;
 function msg(id,text,ok=true){const el=$(id);el.className=ok?'success':'error';el.textContent=text;setTimeout(()=>el.className='',4500)}
 
@@ -120,7 +142,7 @@ function syncDuration(ms){
   return `${Math.floor(s/60)}m ${s%60}s`;
 }
 async function loadAutoSyncStatus(){
-  const s=await api('/api/admin/auto-sync/status');
+  const s=await api('/api/admin/auto-sync/status?_='+Date.now(),{cache:'no-store'});
   $('#autoSyncConfigured').textContent=s.configured?'READY':'NOT CONFIGURED';
   $('#autoSyncConfigured').className=s.configured?'status-ok':'status-bad';
   $('#autoSyncSource').textContent=`${s.source||'Metabase'}${s.metabaseHost?' • '+s.metabaseHost:''}`;
@@ -217,25 +239,54 @@ $('#runAutoSync').onclick=async()=>{
   if(!confirm(confirmText))return;
 
   try{
-    b.disabled=true;b.textContent='SYNCING...';
-    msg('#autoSyncMsg','Update Metabase sedang berjalan. Jangan upload manual sampai proses selesai.');
+    b.disabled=true;b.textContent='STARTING...';
+    msg('#autoSyncMsg','Memulai Update Sales Metabase...');
 
-    const r=await api('/api/admin/auto-sync/run',{
+    const accepted=await api('/api/admin/auto-sync/run',{
       method:'POST',
       body:JSON.stringify(request)
     });
 
+    b.textContent='SYNCING...';
     msg(
       '#autoSyncMsg',
-      `SUCCESS • folder ${r.targetMonth} • ${r.startDate} → ${r.endDate} • `+
-      `${Number(r.rows||0).toLocaleString('id-ID')} rows • ${Number(r.replacedRows||0).toLocaleString('id-ID')} previous rows replaced`
+      `Update Sales berjalan di background • ${accepted.startDate} → ${accepted.endDate}. `+
+      `Halaman ini akan mengecek status otomatis setiap 5 detik.`
+    );
+
+    let finalStatus=null;
+    const pollStarted=Date.now();
+    const maxPollMs=30*60*1000;
+
+    while(Date.now()-pollStarted<maxPollMs){
+      await new Promise(resolve=>setTimeout(resolve,5000));
+      const s=await loadAutoSyncStatus();
+      if(!s.running){
+        finalStatus=s;
+        break;
+      }
+    }
+
+    if(!finalStatus){
+      throw new Error('Update masih berjalan lebih dari 30 menit. Gunakan Refresh Status untuk memantau proses.');
+    }
+
+    if(finalStatus.lastResult!=='SUCCESS'){
+      throw new Error(finalStatus.lastError||`Update selesai dengan status ${finalStatus.lastResult||'FAILED'}`);
+    }
+
+    msg(
+      '#autoSyncMsg',
+      `SUCCESS • folder ${finalStatus.lastTargetMonth||accepted.targetMonth} • `+
+      `${finalStatus.lastStartDate||accepted.startDate} → ${finalStatus.lastEndDate||accepted.endDate} • `+
+      `${Number(finalStatus.lastRows||0).toLocaleString('id-ID')} rows • `+
+      `${Number(finalStatus.lastReplacedRows||0).toLocaleString('id-ID')} previous rows replaced`
     );
 
     META=await api('/api/meta');
     renderRuntime();
     renderMonthStorage();
     renderUploadHistory();
-    await loadAutoSyncStatus();
   }catch(e){
     msg('#autoSyncMsg',e.message,false);
     await loadAutoSyncStatus().catch(()=>{});
