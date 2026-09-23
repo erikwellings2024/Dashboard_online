@@ -153,6 +153,8 @@ let autoSyncStatus = {
   lastEndDate:null,
   lastTargetMonth:null,
   lastRows:null,
+  lastReplacedRows:null,
+  lastTotalRows:null,
   lastDurationMs:null,
   lastTrigger:null,
   lastSourceFile:null,
@@ -2632,6 +2634,8 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
       lastEndDate:range.endDate,
       lastTargetMonth:range.targetMonth,
       lastRows:streamed.validRows,
+      lastReplacedRows:finalized.replacedRows,
+      lastTotalRows:finalized.coverage.rowCount,
       lastDurationMs:durationMs,
       lastTrigger:trigger,
       lastSourceFile:sourceFile,
@@ -2897,12 +2901,37 @@ app.post('/api/query/daily-trend', requireAuth, async (req,res)=>{
 });
 
 
+function noStoreApiResponse(res){
+  res.set({
+    'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma':'no-cache',
+    'Expires':'0',
+    'Surrogate-Control':'no-store'
+  });
+}
+
 app.get('/api/admin/auto-sync/status', requireAdmin, (req,res)=>{
+  noStoreApiResponse(res);
   res.json(publicAutoSyncStatus());
 });
 
-app.post('/api/admin/auto-sync/run', requireAdmin, async (req,res)=>{
+app.post('/api/admin/auto-sync/run', requireAdmin, (req,res)=>{
+  noStoreApiResponse(res);
+
   try{
+    // Reject duplicate/manual writes before starting a background job.
+    if(autoSyncStatus.running){
+      return res.status(409).json({error:'AUTO_SYNC_ALREADY_RUNNING'});
+    }
+    if(dataWriteBusy){
+      return res.status(409).json({error:`DATA_WRITE_BUSY${dataWriteOwner?`: ${dataWriteOwner}`:''}`});
+    }
+    if(!autoSyncConfigured()){
+      return res.status(503).json({
+        error:'AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME and METABASE_PASSWORD in Railway Variables.'
+      });
+    }
+
     const mode=String(req.body?.mode||'current').toLowerCase()==='manual'?'manual':'current';
     const requestedRange=mode==='manual'?{
       mode:'manual',
@@ -2910,14 +2939,36 @@ app.post('/api/admin/auto-sync/run', requireAdmin, async (req,res)=>{
       endDate:String(req.body?.endDate||'').trim()
     }:null;
 
-    const result=await runMetabaseAutoSync(
-      `admin:${req.user.username}`,
-      null,
-      requestedRange
-    );
-    res.json(result);
+    // Validate the requested range before returning 202 so user input errors
+    // are still reported immediately. runMetabaseAutoSync validates it again.
+    const range=resolveAutoSyncDateRange(requestedRange);
+    if(!monthAllowed(range.targetMonth)){
+      return res.status(400).json({error:`AUTO_SYNC_MONTH_OUT_OF_RANGE:${range.targetMonth}`});
+    }
+
+    const trigger=`admin:${req.user.username}`;
+
+    // IMPORTANT: do not await this Promise. The sync can take 8+ minutes,
+    // while Railway/proxy may close a long HTTP request at ~5 minutes.
+    // runMetabaseAutoSync marks the server state RUNNING synchronously before
+    // its first network await, then continues in the background.
+    void runMetabaseAutoSync(trigger,null,requestedRange).catch(e=>{
+      // runMetabaseAutoSync already stores FAILED + lastError. This catch
+      // prevents an unhandled Promise rejection after the 202 response.
+      console.error(`[AUTO_SYNC] background job rejected trigger=${trigger}:`,e.message);
+    });
+
+    return res.status(202).json({
+      ok:true,
+      accepted:true,
+      result:'RUNNING',
+      startDate:range.startDate,
+      endDate:range.endDate,
+      targetMonth:range.targetMonth,
+      message:'Update Sales dimulai dan berjalan di background.'
+    });
   }catch(e){
-    res.status(e.statusCode||500).json({error:e.message});
+    return res.status(e.statusCode||500).json({error:e.message});
   }
 });
 
