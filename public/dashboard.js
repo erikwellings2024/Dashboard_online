@@ -5,6 +5,16 @@ const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':
 const fmt=n=>n===null||n===undefined||!Number.isFinite(Number(n))?'-':Math.round(Number(n)).toLocaleString('en-US');
 const fp=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'-':`${v>=0&&v!==0?'+':''}${(Number(v)*100).toFixed(1)}%`;
 const pct=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'-':`${(Number(v)*100).toFixed(1)}%`;
+const PIVOT_DIMENSIONS=[
+  ['channel','Channel'],['store','Store'],['category','Category'],['brand','Brand'],
+  ['salesType','Sales Type'],['customerType','Customer Type'],['storeStat','Store Stat'],
+  ['sku','SKU'],['itemName','Item Name'],['unitCode','Unit Code'],['date','Date']
+];
+const PIVOT_COLUMN_DIMENSIONS=[
+  ['period','Period'],['channel','Channel'],['store','Store'],['category','Category'],
+  ['brand','Brand'],['salesType','Sales Type'],['customerType','Customer Type'],['storeStat','Store Stat']
+];
+const PIVOT_VALUES=[['sales','Sales'],['trx','Trx'],['qty','Qty'],['basket','Basket Size']];
 // Calendar dates are date-only values. Never convert them through UTC/toISOString(),
 // because users in GMT+7 can lose one day on each conversion.
 const localISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -82,6 +92,7 @@ S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.r
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.pivot={periods:clone(p),prevCount:2,product:'',productLabel:'',rowFields:['channel',''],columnField:'period',valueFields:['sales','trx'],showRows:25,loaded:false,filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
 function rangeControl(section,key,label,period){
@@ -221,6 +232,96 @@ function activeFilterChips(section){
   return chips;
 }
 
+
+function pivotOptionList(options,value,allowBlank=false){
+  const items=allowBlank?[['','None'],...options]:options;
+  return items.map(([v,label])=>`<option value="${esc(v)}" ${String(v)===String(value)?'selected':''}>${esc(label)}</option>`).join('');
+}
+
+function renderPivotBuilder(){
+  const p=S.pivot;
+  const row1=p.rowFields[0]||'channel';
+  const row2=p.rowFields[1]||'';
+  const value1=p.valueFields[0]||'sales';
+  const value2=p.valueFields[1]||'';
+
+  $('#pivotBuilder').innerHTML=`
+    <div class="pivot-builder-grid">
+      <div class="pivot-zone">
+        <div class="pivot-zone-title">ROW FIELDS <span>max 2</span></div>
+        <div class="pivot-builder-row">
+          <label>Row 1</label>
+          <select class="control pivot-builder-select" data-pivot-key="row1">${pivotOptionList(PIVOT_DIMENSIONS,row1)}</select>
+        </div>
+        <div class="pivot-builder-row">
+          <label>Row 2</label>
+          <select class="control pivot-builder-select" data-pivot-key="row2">${pivotOptionList(PIVOT_DIMENSIONS,row2,true)}</select>
+        </div>
+      </div>
+
+      <div class="pivot-zone">
+        <div class="pivot-zone-title">COLUMN FIELD <span>max 1</span></div>
+        <div class="pivot-builder-row">
+          <label>Column</label>
+          <select class="control pivot-builder-select" data-pivot-key="column">${pivotOptionList(PIVOT_COLUMN_DIMENSIONS,p.columnField)}</select>
+        </div>
+        <p class="pivot-zone-note">Period paling ringan. Field lain tetap dibandingkan Current / Previous.</p>
+      </div>
+
+      <div class="pivot-zone">
+        <div class="pivot-zone-title">VALUE FIELDS <span>max 2</span></div>
+        <div class="pivot-builder-row">
+          <label>Value 1</label>
+          <select class="control pivot-builder-select" data-pivot-key="value1">${pivotOptionList(PIVOT_VALUES,value1)}</select>
+        </div>
+        <div class="pivot-builder-row">
+          <label>Value 2</label>
+          <select class="control pivot-builder-select" data-pivot-key="value2">${pivotOptionList(PIVOT_VALUES,value2,true)}</select>
+        </div>
+      </div>
+
+      <div class="pivot-zone pivot-run-zone">
+        <div class="pivot-zone-title">RESULT</div>
+        <div class="pivot-builder-row">
+          <label>Show Row</label>
+          <select class="control pivot-builder-select" data-pivot-key="showRows">
+            ${[10,25,50,100].map(v=>`<option value="${v}" ${Number(p.showRows)===v?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <button class="apply pivot-generate" type="button">GENERATE PIVOT</button>
+      </div>
+    </div>
+    <div class="pivot-builder-help">
+      Data dihitung di server dan browser hanya menerima hasil agregasi. Row Field yang sangat detail seperti SKU/Item dapat membutuhkan filter tambahan.
+    </div>`;
+}
+
+function bindPivotBuilder(){
+  $$('.pivot-builder-select').forEach(sel=>sel.onchange=()=>{
+    const key=sel.dataset.pivotKey;
+    if(key==='row1')S.pivot.rowFields[0]=sel.value;
+    if(key==='row2')S.pivot.rowFields[1]=sel.value;
+    if(key==='column')S.pivot.columnField=sel.value;
+    if(key==='value1')S.pivot.valueFields[0]=sel.value;
+    if(key==='value2')S.pivot.valueFields[1]=sel.value;
+    if(key==='showRows')S.pivot.showRows=Number(sel.value)||25;
+  });
+
+  const generate=$('.pivot-generate');
+  if(generate)generate.onclick=async()=>{
+    const rowFields=S.pivot.rowFields.filter(Boolean);
+    const valueFields=S.pivot.valueFields.filter(Boolean);
+
+    if(!rowFields.length)return alert('Pilih minimal 1 Row Field.');
+    if(new Set(rowFields).size!==rowFields.length)return alert('Row 1 dan Row 2 tidak boleh sama.');
+    if(!valueFields.length)return alert('Pilih minimal 1 Value Field.');
+    if(new Set(valueFields).size!==valueFields.length)return alert('Value 1 dan Value 2 tidak boleh sama.');
+
+    S.pivot.loaded=true;
+    await loadSection('pivot');
+  };
+}
+
 function renderFilters(){
   const p=S.channel.periods;
   $('#channelFilters').innerHTML=`<div class="filter-grid">${rangeControl('channel','p0','Current Period',p[0])}${previous1Control('channel',p[1],S.channel.prevCount>=1)}${previous2Control('channel',p[2],S.channel.prevCount===2)}${multiControl('channel','stores','Store',META.stores,S.channel.filters.stores,true)}${multiControl('channel','categories','Category',META.categories,S.channel.filters.categories,true)}${multiControl('channel','brands','Brand',META.brands,S.channel.filters.brands,true)}${multiControl('channel','salesTypes','Sales Type',META.salesTypes,S.channel.filters.salesTypes)}${multiControl('channel','customerTypes','Customer Type',META.customerTypes||[],S.channel.filters.customerTypes)}${multiControl('channel','storeStats','Store Stat',META.storeStats||[],S.channel.filters.storeStats)}${productPicker('channel','Item (SKU / Name)')}<button class="apply" data-apply="channel">APPLY</button></div><div class="chips"><span class="chip"><b>Section 1 only</b></span>${activeFilterChips('channel')}</div>`;
@@ -248,7 +349,17 @@ function renderFilters(){
   const is=S.itemSales;
   $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${previous1Control('itemSales',is.periods[1],is.prevCount>=1)}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('itemSales')}</div>`;
 
+  const pv=S.pivot;
+  $('#pivotFilters').innerHTML=`<div class="filter-grid">${rangeControl('pivot','p0','Current',pv.periods[0])}${previous1Control('pivot',pv.periods[1],pv.prevCount>=1)}${previous2Control('pivot',pv.periods[2],pv.prevCount===2)}${multiControl('pivot','channels','Channel',META.channels,pv.filters.channels,true)}${multiControl('pivot','stores','Store',META.stores,pv.filters.stores,true)}${multiControl('pivot','categories','Category',META.categories,pv.filters.categories,true)}${multiControl('pivot','brands','Brand',META.brands,pv.filters.brands,true)}${multiControl('pivot','salesTypes','Sales Type',META.salesTypes,pv.filters.salesTypes)}${multiControl('pivot','customerTypes','Customer Type',META.customerTypes||[],pv.filters.customerTypes)}${multiControl('pivot','storeStats','Store Stat',META.storeStats||[],pv.filters.storeStats)}${productPicker('pivot','Item (SKU / Name)')}</div><div class="chips"><span class="chip"><b>Section 9 only</b></span>${activeFilterChips('pivot')}</div>`;
+  renderPivotBuilder();
+
   bindFilters();
+  bindPivotBuilder();
+}
+
+function maybeLoadSection(sec){
+  if(sec==='pivot' && !S.pivot.loaded)return;
+  return loadSection(sec);
 }
 
 function bindFilters(){
@@ -387,28 +498,28 @@ $$('.prev1-hide').forEach(btn=>btn.onclick=e=>{
   const sec=btn.dataset.section;
   S[sec].prevCount=0;
   renderFilters();
-  loadSection(sec);
+  maybeLoadSection(sec);
 });
 $$('.prev1-show').forEach(btn=>btn.onclick=e=>{
   e.preventDefault();e.stopPropagation();
   const sec=btn.dataset.section;
   S[sec].prevCount=Math.max(1,S[sec].prevCount||0);
   renderFilters();
-  loadSection(sec);
+  maybeLoadSection(sec);
 });
 $$('.prev2-hide').forEach(btn=>btn.onclick=e=>{
   e.preventDefault();e.stopPropagation();
   const sec=btn.dataset.section;
   S[sec].prevCount=1;
   renderFilters();
-  loadSection(sec);
+  maybeLoadSection(sec);
 });
 $$('.prev2-show').forEach(btn=>btn.onclick=e=>{
   e.preventDefault();e.stopPropagation();
   const sec=btn.dataset.section;
   S[sec].prevCount=2;
   renderFilters();
-  loadSection(sec);
+  maybeLoadSection(sec);
 });
 $$('[data-apply]').forEach(b=>b.onclick=()=>{
   const sec=b.dataset.apply;
@@ -422,7 +533,7 @@ $$('[data-apply]').forEach(b=>b.onclick=()=>{
   }
 
   renderFilters();
-  loadSection(sec);
+  maybeLoadSection(sec);
 });
 $$('.range').forEach(setupRange);
 }
@@ -569,7 +680,7 @@ function setupRange(f){
 
     temp=null;
     renderFilters();
-    loadSection(sec);
+    maybeLoadSection(sec);
   };
 
   $('.clear',f).onclick=e=>{
@@ -594,7 +705,8 @@ if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
 if(sec==='daily'){showLoad('#dailyTable');const filters=reqFilters('daily');filters.product=S.daily.product;const d=await api('/api/query/daily-trend',{method:'POST',body:JSON.stringify({period:S.daily.period,filters,metricMode:S.daily.metricMode})});renderDailyTrend(d)}
 if(sec==='itemSales'){showLoad('#itemSalesTable');const filters=reqFilters('itemSales');filters.product=S.itemSales.product;const d=await api('/api/query/item-sales',{method:'POST',body:JSON.stringify({periods:periodsFor('itemSales'),filters,topN:S.itemSales.topN,metricMode:S.itemSales.metricMode})});renderItemSales(d)}
-}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+if(sec==='pivot'){showLoad('#pivotTable');const filters=reqFilters('pivot');filters.product=S.pivot.product;const d=await api('/api/query/pivot-analysis',{method:'POST',body:JSON.stringify({periods:periodsFor('pivot'),filters,rowFields:S.pivot.rowFields.filter(Boolean),columnField:S.pivot.columnField,valueFields:S.pivot.valueFields.filter(Boolean),showRows:S.pivot.showRows})});renderPivot(d)}
+}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable',pivot:'#pivotTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
 
@@ -976,6 +1088,132 @@ function renderItemSales(d){
   enhanceTable($('#itemSalesTable table'));
 }
 
+
+function pivotCellValue(cell,metric){
+  const x=cell||{};
+  if(metric==='sales')return Number(x.sales||0);
+  if(metric==='qty')return Number(x.qty||0);
+  if(metric==='trx')return Number(x.trx||0);
+  if(metric==='basket')return Number(x.basket||0);
+  return 0;
+}
+
+function pivotMetricText(cell,metric){
+  return fmt(pivotCellValue(cell,metric));
+}
+
+function renderPivot(d){
+  const rowFields=d.rowFields||[];
+  const rowLabels=d.rowFieldLabels||rowFields;
+  const values=d.valueFields||[];
+  const valueLabels=d.valueFieldLabels||values;
+  const periods=d.periods||periodsFor('pivot');
+  const rowCount=rowFields.length;
+  const metricCount=Math.max(1,values.length);
+  const info=$('#pivotInfo');
+
+  let head='';
+  let leafKeys=[];
+
+  if(d.columnField==='period'){
+    head='<thead><tr>';
+    rowLabels.forEach(label=>head+=`<th rowspan="2">${esc(label)}</th>`);
+    (d.columnGroups||[]).forEach(g=>{
+      head+=`<th colspan="${metricCount}" class="${g.periodIndex===0?'group-current':g.periodIndex===1?'group-prev1':'group-prev2'}">${esc(g.label)}<span class="period-sub">${rangeLabel(g.period)}</span></th>`;
+      values.forEach(metric=>leafKeys.push({cellKey:g.key,metric,series:g.label}));
+    });
+    head+='</tr><tr>';
+    (d.columnGroups||[]).forEach(()=>valueLabels.forEach(label=>head+=`<th>${esc(label)}</th>`));
+    head+='</tr></thead>';
+  }else{
+    const grouped=[];
+    for(const value of d.columnValues||[]){
+      grouped.push({
+        value,
+        groups:(d.columnGroups||[]).filter(g=>g.dimensionValue===value)
+      });
+    }
+
+    head='<thead><tr>';
+    rowLabels.forEach(label=>head+=`<th rowspan="3">${esc(label)}</th>`);
+    grouped.forEach(g=>{
+      head+=`<th colspan="${g.groups.length*metricCount}" class="pivot-column-group">${esc(g.value)}</th>`;
+    });
+    head+='</tr><tr>';
+    grouped.forEach(g=>g.groups.forEach(pg=>{
+      head+=`<th colspan="${metricCount}" class="${pg.periodIndex===0?'group-current':pg.periodIndex===1?'group-prev1':'group-prev2'}">${pg.periodIndex===0?'Current':`Previous ${pg.periodIndex}`}<span class="period-sub">${rangeLabel(pg.period)}</span></th>`;
+    }));
+    head+='</tr><tr>';
+    grouped.forEach(g=>g.groups.forEach(pg=>valueLabels.forEach((label,vi)=>{
+      head+=`<th>${esc(label)}</th>`;
+      leafKeys.push({cellKey:pg.key,metric:values[vi],series:`${g.value} • ${pg.periodIndex===0?'Current':`P${pg.periodIndex}`}`});
+    })));
+    head+='</tr></thead>';
+  }
+
+  const chartFirstMetric=values[0];
+  const chartCols=[];
+  const chartSeries=[];
+  if(d.columnField==='period'){
+    (d.columnGroups||[]).forEach((g,gi)=>{
+      chartCols.push(rowCount + gi*metricCount);
+      chartSeries.push(g.label);
+    });
+  }else{
+    // Keep charts readable: first value, Current period, maximum six column members.
+    (d.columnValues||[]).slice(0,6).forEach((value,ci)=>{
+      chartCols.push(rowCount + (ci*periods.length)*metricCount);
+      chartSeries.push(String(value).replace(/,/g,' '));
+    });
+  }
+
+  let h=`<table class="sortable-table chart-table pivot-result-table"
+    data-chart-label="0"
+    data-chart-label-cols="${rowFields.map((_,i)=>i).join(',')}"
+    data-chart-cols="${chartCols.join(',')}"
+    data-chart-series="${esc(chartSeries.join(','))}">
+    ${head}<tbody>`;
+
+  for(const r of d.rows||[]){
+    h+='<tr>';
+    (r.labels||[]).forEach(label=>h+=`<td>${esc(label)}</td>`);
+    leafKeys.forEach(leaf=>{
+      h+=`<td class="num">${pivotMetricText(r.cells?.[leaf.cellKey],leaf.metric)}</td>`;
+    });
+    h+='</tr>';
+  }
+
+  function totalRow(label,totals,cls='pivot-total'){
+    let row=`<tr class="${cls} no-sort-row"><td colspan="${rowCount}">${esc(label)}</td>`;
+    leafKeys.forEach(leaf=>row+=`<td class="num">${pivotMetricText(totals?.[leaf.cellKey],leaf.metric)}</td>`);
+    return row+'</tr>';
+  }
+
+  if(d.rowTruncated){
+    h+=totalRow(`TOTAL DISPLAYED (${d.shownRowGroups} ROW)`,d.displayedTotal,'rank-summary pivot-total-displayed');
+  }
+  h+=totalRow('GRAND TOTAL',d.grandTotal,'total pivot-grand-total');
+  h+='</tbody></table>';
+
+  $('#pivotTable').innerHTML=h;
+
+  const notes=[];
+  notes.push(`Row: ${rowLabels.join(' > ')}`);
+  notes.push(`Column: ${d.columnFieldLabel||d.columnField}`);
+  notes.push(`Value: ${valueLabels.join(' + ')}`);
+  notes.push(`Menampilkan ${d.shownRowGroups||0} dari ${d.totalRowGroups||0} row group`);
+  if(d.columnField!=='period'){
+    notes.push(`Column member ${d.columnValueCountShown||0} dari ${d.columnValueCountAll||0}`);
+  }
+  if(d.rowTruncated)notes.push('Row dibatasi sesuai Show Row dan diurutkan berdasarkan Current Value 1');
+  if(d.columnTruncated)notes.push('Column member otomatis dibatasi agar tabel tetap ringan; gunakan filter bila membutuhkan member lain');
+
+  if(info)info.innerHTML=notes.map(x=>`<span>${esc(x)}</span>`).join('');
+
+  const table=$('#pivotTable table');
+  enhanceTable(table);
+}
+
 function enhanceTable(table){addSort(table)}
 
 function addSort(table){
@@ -1120,6 +1358,16 @@ function jpegFilterPairs(sec){
 
     if(value)pairs.push([label,value]);
   });
+
+  if(sec.id==='pivotSection' && S.pivot){
+    const rowLabels=S.pivot.rowFields.filter(Boolean).map(v=>PIVOT_DIMENSIONS.find(x=>x[0]===v)?.[1]||v);
+    const colLabel=PIVOT_COLUMN_DIMENSIONS.find(x=>x[0]===S.pivot.columnField)?.[1]||S.pivot.columnField;
+    const valueLabels=S.pivot.valueFields.filter(Boolean).map(v=>PIVOT_VALUES.find(x=>x[0]===v)?.[1]||v);
+    pairs.push(['Pivot Row',rowLabels.join(' > ')]);
+    pairs.push(['Pivot Column',colLabel]);
+    pairs.push(['Pivot Value',valueLabels.join(' + ')]);
+    pairs.push(['Show Row',String(S.pivot.showRows)]);
+  }
 
   // Include context chips such as Time Factor, but skip "Section X only".
   $$('.section-filter .chips .chip',sec).forEach(chip=>{
@@ -1438,7 +1686,7 @@ $$('.metric-select').forEach(sel=>sel.onchange=()=>{
   }
 });
 $$('.chart-btn').forEach(b=>b.onclick=()=>createChart(b.closest('.section')));
-function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')).slice(0,15);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>r.cells[labelCol]?.textContent||''),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
+function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')).slice(0,15),labelCols=(t.dataset.chartLabelCols||'').split(',').filter(x=>x!=='').map(Number);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>labelCols.length?labelCols.map(c=>r.cells[c]?.textContent||'').filter(Boolean).join(' > '):(r.cells[labelCol]?.textContent||'')),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
 
 
 function normalUpdateHeaderText(){
@@ -1505,7 +1753,8 @@ const SECTION_STATE_MAP={
   brandSection:'brand',
   itemSection:'item',
   dailySection:'daily',
-  itemSalesSection:'itemSales'
+  itemSalesSection:'itemSales',
+  pivotSection:'pivot'
 };
 
 function sectionVisibilityKey(){
@@ -1525,7 +1774,9 @@ function saveSectionVisibility(prefs){
 }
 
 function isSectionHiddenByPreference(sectionId){
-  return loadSectionVisibility()[sectionId]===false;
+  const prefs=loadSectionVisibility();
+  if(Object.prototype.hasOwnProperty.call(prefs,sectionId))return prefs[sectionId]===false;
+  return document.getElementById(sectionId)?.dataset.defaultHidden==='1';
 }
 
 function setupSectionVisibility(){
@@ -1544,7 +1795,7 @@ function setupSectionVisibility(){
       if(actions)actions.prepend(btn);
     }
 
-    const hidden=prefs[id]===false;
+    const hidden=Object.prototype.hasOwnProperty.call(prefs,id)?prefs[id]===false:sec.dataset.defaultHidden==='1';
     sec.classList.toggle('section-collapsed',hidden);
     btn.textContent=hidden?'Show':'Hide';
     btn.title=hidden?'Show section':'Hide section';
@@ -1563,6 +1814,7 @@ function setupSectionVisibility(){
       // refresh that section once with the user's current filters.
       if(!nowHidden){
         const stateKey=SECTION_STATE_MAP[id];
+        if(stateKey==='pivot' && !S.pivot.loaded)return;
         if(stateKey)await loadSection(stateKey);
       }
     };
@@ -1583,9 +1835,10 @@ async function boot(){
   renderFilters();
   setupSectionVisibility();
 
-  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily','itemSales']){
+  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily','itemSales','pivot']){
     const sectionId=Object.keys(SECTION_STATE_MAP).find(k=>SECTION_STATE_MAP[k]===sec);
     if(sectionId && isSectionHiddenByPreference(sectionId))continue;
+    if(sec==='pivot' && !S.pivot.loaded)continue;
     await loadSection(sec);
   }
 
