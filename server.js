@@ -1331,6 +1331,12 @@ function basketSizeDetailQuery(sourceRows,periods,filters,bandsInput,showRows){
   }
 
   const totals=invoiceMaps.map(m=>m.size);
+  const basketSizes=invoiceMaps.map(map=>{
+    if(!map.size)return 0;
+    let sales=0;
+    for(const value of map.values())sales+=safeNum(value);
+    return sales/map.size;
+  });
   const rows=bands.map((band,index)=>({
     index:index+1,
     band:basketBandPublic(band),
@@ -1347,6 +1353,7 @@ function basketSizeDetailQuery(sourceRows,periods,filters,bandsInput,showRows){
     totals,
     classified,
     unclassified:totals.map((n,i)=>Math.max(0,n-classified[i])),
+    basketSizes,
     showRows:bands.length
   };
 }
@@ -3343,4 +3350,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
