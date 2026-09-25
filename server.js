@@ -1237,6 +1237,120 @@ function metricsByPeriod(rows, periods) {
   return periods.map(p => metrics(rows.filter(r => rowInPeriod(r,p))));
 }
 
+// Detail Trx & Basket Size ---------------------------------------------------
+// Basket bands are intentionally user-configurable. A range (`-`) includes
+// both endpoints, while > / >= / < / <= follow their mathematical meaning.
+// We reject any overlapping bands so one transaction can never be counted in
+// two rows. Example: >125000 + 100000-125000 is valid, but >=125000 +
+// 100000-125000 is rejected because both rows would include exactly 125000.
+function normalizeBasketBands(input,showRows){
+  const n=Math.max(1,Math.min(10,Number(showRows)||1));
+  if(!Array.isArray(input) || input.length<n) throw new Error('BASKET_BANDS_INCOMPLETE');
+
+  const allowed=new Set(['gt','gte','range','lt','lte']);
+  const bands=[];
+  for(let i=0;i<n;i++){
+    const src=input[i]||{};
+    const type=String(src.type||'').trim();
+    if(!allowed.has(type)) throw new Error(`BASKET_BAND_TYPE_INVALID_ROW_${i+1}`);
+
+    const num=v=>{
+      if(v==='' || v===null || v===undefined) return null;
+      const x=Number(v);
+      return Number.isFinite(x) && x>=0 ? x : null;
+    };
+
+    if(type==='range'){
+      const min=num(src.min),max=num(src.max);
+      if(min===null || max===null) throw new Error(`BASKET_BAND_VALUE_REQUIRED_ROW_${i+1}`);
+      if(min>max) throw new Error(`BASKET_BAND_RANGE_INVALID_ROW_${i+1}`);
+      bands.push({type,min,max,minInclusive:true,maxInclusive:true});
+    }else{
+      const value=num(src.value);
+      if(value===null) throw new Error(`BASKET_BAND_VALUE_REQUIRED_ROW_${i+1}`);
+      if(type==='gt') bands.push({type,value,min:value,max:Infinity,minInclusive:false,maxInclusive:false});
+      if(type==='gte')bands.push({type,value,min:value,max:Infinity,minInclusive:true,maxInclusive:false});
+      if(type==='lt') bands.push({type,value,min:-Infinity,max:value,minInclusive:false,maxInclusive:false});
+      if(type==='lte')bands.push({type,value,min:-Infinity,max:value,minInclusive:false,maxInclusive:true});
+    }
+  }
+
+  const contains=(band,x)=>{
+    if(x<band.min || x>band.max)return false;
+    if(x===band.min && !band.minInclusive)return false;
+    if(x===band.max && !band.maxInclusive)return false;
+    return true;
+  };
+  const overlaps=(a,b)=>{
+    const lo=Math.max(a.min,b.min),hi=Math.min(a.max,b.max);
+    if(lo<hi)return true;
+    if(lo>hi)return false;
+    return contains(a,lo) && contains(b,lo);
+  };
+
+  for(let i=0;i<bands.length;i++){
+    for(let j=i+1;j<bands.length;j++){
+      if(overlaps(bands[i],bands[j])){
+        const err=new Error(`BASKET_BANDS_OVERLAP_ROW_${i+1}_${j+1}`);
+        err.rows=[i+1,j+1];
+        throw err;
+      }
+    }
+  }
+  return bands;
+}
+
+function basketBandMatches(band,value){
+  if(band.type==='gt')return value>band.value;
+  if(band.type==='gte')return value>=band.value;
+  if(band.type==='lt')return value<band.value;
+  if(band.type==='lte')return value<=band.value;
+  return value>=band.min && value<=band.max;
+}
+
+function basketBandPublic(band){
+  if(band.type==='range')return {type:band.type,min:band.min,max:band.max};
+  return {type:band.type,value:band.value};
+}
+
+function basketSizeDetailQuery(sourceRows,periods,filters,bandsInput,showRows){
+  const base=filterBase(sourceRows,filters);
+  const bands=normalizeBasketBands(bandsInput,showRows);
+
+  // Build basket value per invoice separately for each comparison period.
+  // This mirrors the dashboard's existing basket-size definition:
+  // total filtered `sales` (sub_total_inv fallback sub_total) / unique invoice.
+  const invoiceMaps=periods.map(()=>new Map());
+  for(const r of base){
+    if(!r.invoice)continue;
+    for(let i=0;i<periods.length;i++){
+      if(!rowInPeriod(r,periods[i]))continue;
+      const map=invoiceMaps[i];
+      map.set(r.invoice,(map.get(r.invoice)||0)+safeNum(r.sales));
+    }
+  }
+
+  const totals=invoiceMaps.map(m=>m.size);
+  const rows=bands.map((band,index)=>({
+    index:index+1,
+    band:basketBandPublic(band),
+    periods:invoiceMaps.map((map,pi)=>{
+      let trx=0;
+      for(const basket of map.values())if(basketBandMatches(band,basket))trx++;
+      return {trx,pct:pct(trx,totals[pi])};
+    })
+  }));
+
+  const classified=periods.map((_,pi)=>rows.reduce((sum,r)=>sum+safeNum(r.periods[pi]?.trx),0));
+  return {
+    rows,
+    totals,
+    classified,
+    unclassified:totals.map((n,i)=>Math.max(0,n-classified[i])),
+    showRows:bands.length
+  };
+}
+
 function channelQuery(sourceRows, periods, filters) {
   const base = filterBase(sourceRows,filters);
   const channels = activeChannels();
@@ -2861,6 +2975,26 @@ app.post('/api/query/items', requireAuth, async (req,res)=>{
 
 
 
+app.post('/api/query/trx-basket-size', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('trx-basket-size',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      const showRows=Math.max(1,Math.min(10,Number(req.body.showRows)||3));
+      return basketSizeDetailQuery(
+        rows,
+        periods,
+        req.body.filters||{},
+        req.body.bands||[],
+        showRows
+      );
+    });
+    res.json(result);
+  }catch(e){
+    res.status(400).json({error:e.message,rows:e.rows||undefined});
+  }
+});
+
 app.post('/api/query/item-sales', requireAuth, async (req,res)=>{
   try{
     const result=await runHeavyQuery('item-sales',req.body,async()=>{
@@ -3181,6 +3315,11 @@ app.get('/dashboard.html', async (req,res)=>{
   if (!user) return res.redirect('/login.html');
   res.sendFile(path.join(ROOT,'public','dashboard.html'));
 });
+app.get('/trx-bs.html', async (req,res)=>{
+  const user=await resolveActiveUser(readAuth(req));
+  if (!user) return res.redirect('/login.html');
+  res.sendFile(path.join(ROOT,'public','trx-bs.html'));
+});
 app.get('/admin.html', async (req,res)=>{
   const user=await resolveActiveUser(readAuth(req));
   if (!user) return res.redirect('/login.html');
@@ -3204,4 +3343,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
