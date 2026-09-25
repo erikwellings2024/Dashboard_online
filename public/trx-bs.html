@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Detail Trx & Basket Size</title>
+  <link rel="stylesheet" href="/app.css?v=20260925-49">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Detail Trx & Basket Size</h1>
+    <p>Analisa distribusi transaksi berdasarkan basket-size band yang dapat diatur bebas</p>
+  </div>
+  <div class="actions">
+    <span class="update-chip" id="updatedAt">NO RAW DATA</span>
+    <span class="user-chip" id="userChip">...</span>
+    <a class="btn" href="/dashboard.html">Dashboard</a>
+    <a class="btn hidden" id="adminLink" href="/admin.html">Admin Settings</a>
+    <button class="btn" id="logoutBtn">Logout</button>
+  </div>
+</header>
+
+<main class="page trx-bs-page">
+  <div id="noData" class="notice hidden">Belum ada raw data. Login sebagai Admin lalu upload/update sales data terlebih dahulu.</div>
+
+  <section class="section" id="basketSection">
+    <div class="section-head">
+      <div class="section-title">
+        <span class="section-no">A</span>
+        <div>
+          <h2>Basket Size Distribution</h2>
+          <p>Trx dan % transaksi pada tiap basket-size band untuk Current, Previous 1, dan Previous 2</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-filter" id="basketFilters"></div>
+
+    <div class="basket-rule-help">
+      <b>Aturan batas:</b> range <b>-</b> memasukkan kedua angka batas. Karena itu band tidak boleh overlap.
+      Contoh <b>&gt; 125,000</b> + <b>100,000 - 125,000</b> valid; tetapi
+      <b>&ge; 125,000</b> + <b>100,000 - 125,000</b> tidak valid karena 125,000 terhitung dua kali.
+    </div>
+    <div id="basketValidation" class="error basket-validation hidden"></div>
+    <div id="basketTable" class="table-wrap"><div class="loading">Loading...</div></div>
+  </section>
+
+  <div class="footer">% = jumlah Trx pada basket-size band ÷ total Trx pada periode setelah filter diterapkan.</div>
+</main>
+<script src="/trx-bs.js?v=20260925-49"></script>
+</body>
+</html>

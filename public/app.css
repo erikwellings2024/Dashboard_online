@@ -1541,3 +1541,60 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
     grid-template-columns:1fr;
   }
 }
+
+/* V49 — Detail Trx & Basket Size */
+.trx-bs-page{max-width:1920px}
+.basket-rule-help{
+  margin:10px;
+  padding:9px 11px;
+  border-left:4px solid var(--green);
+  background:#f7faf8;
+  font-size:10.5px;
+  line-height:1.5;
+  color:#475467;
+}
+.basket-validation{margin:0 10px 10px}
+.basket-table{min-width:900px}
+.basket-table th,.basket-table td{vertical-align:middle}
+.basket-table .basket-type-cell{width:100px;text-align:center}
+.basket-table .basket-band-cell{min-width:300px}
+.basket-rule-type{
+  width:72px;
+  height:32px;
+  border:1px solid #aeb7c0;
+  background:#fff;
+  padding:0 6px;
+  font-weight:700;
+}
+.basket-value-wrap{display:flex;align-items:center;gap:7px;min-width:250px}
+.basket-value-input{
+  width:125px;
+  height:32px;
+  border:1px solid #aeb7c0;
+  background:#fff;
+  padding:0 8px;
+  text-align:right;
+}
+.basket-value-wrap .dash{font-weight:700;color:#667085}
+.basket-row-invalid td:first-child,
+.basket-row-invalid td:nth-child(2){background:#fff1f0}
+.basket-total-row td{background:#f3df79;font-weight:700}
+.basket-unclassified{
+  padding:8px 10px;
+  border-top:1px solid #ccd3d9;
+  background:#fafbfc;
+  font-size:10.5px;
+  color:#5d6671;
+}
+.basket-unclassified strong{color:#27323d}
+.basket-pending{
+  padding:12px 10px;
+  border-top:1px solid #d9dfe4;
+  background:#fffdf5;
+  font-size:10.5px;
+  color:#765d1d;
+}
+@media(max-width:900px){
+  .basket-value-wrap{min-width:220px}
+  .basket-value-input{width:105px}
+}
