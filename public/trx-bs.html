@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Detail Trx & Basket Size</title>
-  <link rel="stylesheet" href="/app.css?v=20260925-49">
+  <link rel="stylesheet" href="/app.css?v=20260925-50">
 </head>
 <body>
 <header class="topbar">
@@ -33,8 +33,20 @@
           <p>Trx dan % transaksi pada tiap basket-size band untuk Current, Previous 1, dan Previous 2</p>
         </div>
       </div>
+      <div class="section-actions">
+        <button class="btn section-toggle-btn" id="basketHideBtn" type="button">Hide</button>
+        <button class="btn blue" id="basketChartBtn" type="button">Create Chart</button>
+        <div class="download-wrap" id="basketDownloadWrap">
+          <button class="btn download-btn" id="basketDownloadBtn" type="button">Download Report ▾</button>
+          <div class="download-menu">
+            <button id="basketExportExcel" type="button">Download Excel</button>
+            <button id="basketExportJpeg" type="button">Download JPEG</button>
+          </div>
+        </div>
+      </div>
     </div>
 
+    <div class="section-body" id="basketSectionBody">
     <div class="section-filter" id="basketFilters"></div>
 
     <div class="basket-rule-help">
@@ -44,10 +56,13 @@
     </div>
     <div id="basketValidation" class="error basket-validation hidden"></div>
     <div id="basketTable" class="table-wrap"><div class="loading">Loading...</div></div>
+    </div>
   </section>
 
   <div class="footer">% = jumlah Trx pada basket-size band ÷ total Trx pada periode setelah filter diterapkan.</div>
 </main>
-<script src="/trx-bs.js?v=20260925-49"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="/trx-bs.js?v=20260925-50"></script>
 </body>
 </html>

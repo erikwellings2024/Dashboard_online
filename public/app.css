@@ -1598,3 +1598,17 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
   .basket-value-wrap{min-width:220px}
   .basket-value-input{width:105px}
 }
+
+
+/* V50 — Detail Trx & BS summary row + section actions */
+.basket-average-row td{
+  background:#d9eadf;
+  font-weight:700;
+}
+.basket-average-row .basket-average-value{
+  text-align:center;
+  font-size:12px;
+}
+#basketSection.trx-bs-collapsed{margin-bottom:8px}
+#basketSection.trx-bs-collapsed .section-head{border-bottom:0}
+#basketSection .section-body.hidden{display:none !important}

@@ -278,7 +278,10 @@ function renderBasketTable(){
     for(let pi=0;pi<periods.length;pi++){const r=resultFor(i,pi);h+=`<td class="num">${r?fmt(r.trx):'-'}</td><td class="num">${r?pct(r.pct):'-'}</td>`}
     h+='</tr>';
   }
-  if(S.lastResult){h+='<tr class="basket-total-row"><td colspan="2">TOTAL TRX</td>'+periods.map((_,i)=>`<td class="num">${fmt(S.lastResult.totals?.[i]||0)}</td><td class="num">100.0%</td>`).join('')+'</tr>'}
+  if(S.lastResult){
+    h+='<tr class="basket-total-row no-chart-row"><td colspan="2">TOTAL TRX</td>'+periods.map((_,i)=>`<td class="num">${fmt(S.lastResult.totals?.[i]||0)}</td><td class="num">100.0%</td>`).join('')+'</tr>';
+    h+='<tr class="basket-average-row no-chart-row"><td colspan="2">BASKET SIZE</td>'+periods.map((_,i)=>`<td class="num basket-average-value" colspan="2">${fmt(S.lastResult.basketSizes?.[i]||0)}</td>`).join('')+'</tr>';
+  }
   h+='</tbody></table>';
   if(S.lastResult){
     const parts=periods.map((_,i)=>`${i===0?'Current':i===1?'Previous 1':'Previous 2'}: <strong>${fmt(S.lastResult.unclassified?.[i]||0)}</strong>`);
@@ -310,6 +313,98 @@ async function loadBasket(){
   }
 }
 
+
+function bandText(band){
+  if(!band)return '-';
+  if(band.type==='range')return `${fmt(band.min)} - ${fmt(band.max)}`;
+  return `${typeSymbol(band.type)} ${fmt(band.value)}`;
+}
+function periodName(i){return i===0?'Current':i===1?'Previous 1':'Previous 2'}
+function safeFileName(s){return String(s||'report').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'').toLowerCase()}
+
+function setupSectionActions(){
+  const sec=$('#basketSection'),body=$('#basketSectionBody'),hide=$('#basketHideBtn');
+  hide.onclick=()=>{
+    const hidden=body.classList.toggle('hidden');
+    hide.textContent=hidden?'Show':'Hide';
+    sec.classList.toggle('trx-bs-collapsed',hidden);
+  };
+  $('#basketDownloadBtn').onclick=e=>{e.stopPropagation();$('#basketDownloadWrap').classList.toggle('open')};
+  document.addEventListener('click',e=>{const w=$('#basketDownloadWrap');if(w&&!w.contains(e.target))w.classList.remove('open')});
+  $('#basketChartBtn').onclick=createBasketChart;
+  $('#basketExportExcel').onclick=()=>{$('#basketDownloadWrap').classList.remove('open');exportBasketExcel()};
+  $('#basketExportJpeg').onclick=()=>{$('#basketDownloadWrap').classList.remove('open');exportBasketJpeg()};
+}
+
+function createBasketChart(){
+  if(!S.lastResult)return alert('Klik APPLY terlebih dahulu agar data chart tersedia.');
+  const periods=periodsForRequest();
+  const rows=(S.lastResult.rows||[]).slice(0,S.showRows);
+  if(!rows.length)return alert('No chart data');
+  const data={
+    labels:rows.map(r=>bandText(r.band)),
+    series:periods.map((_,pi)=>({name:periodName(pi),values:rows.map(r=>Number(((r.periods?.[pi]?.pct)||0)*100))})),
+    basketSizes:periods.map((_,pi)=>({name:periodName(pi),value:Number(S.lastResult.basketSizes?.[pi]||0)})),
+    periods:periods.map((p,pi)=>({name:periodName(pi),value:rangeLabel(p)}))
+  };
+  const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Basket Size Distribution Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods,.basket-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.chip{background:#fff;border:1px solid #cbd3da;padding:7px 9px;font-size:12px}.box{background:#fff;border:1px solid #c7cfd7;padding:16px}canvas{display:block;max-width:100%}.note{font-size:12px;color:#667085;margin-top:10px}</style></head><body><div class="page"><h1>Basket Size Distribution</h1><div class="periods">${data.periods.map(p=>`<span class="chip"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div class="basket-summary">${data.basketSizes.map(p=>`<span class="chip"><b>${p.name} Basket Size:</b> ${Math.round(p.value).toLocaleString('en-US')}</span>`).join('')}</div><div class="box"><h2>% Transaction by Basket Size Band</h2><canvas id="c"></canvas><div class="note">Semakin besar porsi pada band basket size yang lebih tinggi, semakin banyak transaksi yang bergeser ke nilai belanja lebih besar.</div></div></div><script>const d=${JSON.stringify(data)},colors=['#4d9a63','#5d8fb9','#d49a3a'];const c=document.getElementById('c'),W=1180,rowH=Math.max(72,34+d.series.length*14),H=Math.max(360,100+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=60,T=50,B=46,cw=W-L-R,ch=H-T-B,gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(11,Math.min(20,(gh-22)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const v=q*20,xx=L+cw*v/100;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(v+'%',xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.fillStyle='#344054';x.font='bold 12px Arial';x.fillText(lab,10,gy+gh/2+4);d.series.forEach((ser,j)=>{const v=ser.values[i]||0,bw=Math.max(0,Math.min(100,v))/100*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle='#344054';x.font='10px Arial';x.fillText(v.toFixed(1)+'%',L+bw+5,y+bh-3)})});x.font='11px Arial';d.series.forEach((ser,j)=>{x.fillStyle=colors[j%colors.length];x.fillRect(L+j*180,12,12,12);x.fillStyle='#344054';x.fillText(ser.name,L+18+j*180,22)});<\/script></body></html>`);
+  w.document.close();
+}
+
+function exportFilterPairs(){
+  const pairs=[];
+  $$('.field',$('#basketFilters')).forEach(field=>{
+    const label=$('label',field)?.textContent?.trim();if(!label)return;
+    let value='';
+    if(field.classList.contains('range'))value=$('.control span:first-child',field)?.textContent?.trim()||'';
+    else if(field.classList.contains('multi')){const opts=$$('.option input',field),checked=opts.filter(x=>x.checked).map(x=>x.value);value=checked.length===opts.length?`All ${label}`:(checked.join(', ')||'None')}
+    else if(field.classList.contains('product-picker'))value=$('.product-input',field)?.value.trim()||'All Item';
+    else {const sel=$('select',field);if(sel)value=sel.options[sel.selectedIndex]?.textContent||sel.value}
+    if(value)pairs.push([label,value]);
+  });
+  return pairs;
+}
+
+async function exportBasketExcel(){
+  if(!S.lastResult)return alert('Klik APPLY terlebih dahulu sebelum download report.');
+  if(!window.ExcelJS)return alert('Excel library unavailable');
+  const btn=$('#basketExportExcel'),old=btn.textContent;btn.disabled=true;btn.textContent='Preparing Excel...';
+  try{
+    const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('Basket Size Analysis');wb.creator='Sales Monitoring Dashboard';
+    ws.addRow(['Detail Trx & Basket Size']);ws.getRow(1).font={bold:true,size:15};
+    for(const [k,v] of exportFilterPairs())ws.addRow([k,v]);
+    ws.addRow([]);
+    const periods=periodsForRequest();
+    const header1=['TYPE','BASKET SIZE'];periods.forEach((p,i)=>header1.push(`${periodName(i)} — ${rangeLabel(p)}`,' '));ws.addRow(header1);
+    const header2=['',''];periods.forEach(()=>header2.push('Trx','%'));ws.addRow(header2);
+    const headerStart=ws.rowCount-1;
+    for(const r of (S.lastResult.rows||[]).slice(0,S.showRows)){
+      const row=[typeSymbol(r.band.type),bandText(r.band)];
+      periods.forEach((_,pi)=>{const m=r.periods?.[pi]||{};row.push(Number(m.trx||0),Number(m.pct||0))});ws.addRow(row);
+    }
+    const total=['TOTAL TRX',''];periods.forEach((_,pi)=>total.push(Number(S.lastResult.totals?.[pi]||0),1));ws.addRow(total);ws.getRow(ws.rowCount).font={bold:true};
+    const avg=['BASKET SIZE',''];periods.forEach((_,pi)=>avg.push(Number(S.lastResult.basketSizes?.[pi]||0),''));ws.addRow(avg);ws.getRow(ws.rowCount).font={bold:true};
+    for(let r=headerStart;r<=ws.rowCount;r++){for(let c=1;c<=ws.columnCount;c++){const cell=ws.getRow(r).getCell(c);cell.border={top:{style:'thin'},left:{style:'thin'},bottom:{style:'thin'},right:{style:'thin'}};if(r<=headerStart+1){cell.font={bold:true};cell.alignment={horizontal:'center'}}}}
+    for(let r=headerStart+2;r<=ws.rowCount;r++){for(let pi=0;pi<periods.length;pi++){ws.getRow(r).getCell(3+pi*2).numFmt='#,##0';ws.getRow(r).getCell(4+pi*2).numFmt='0.0%'}}
+    const avgRow=ws.getRow(ws.rowCount);for(let pi=0;pi<periods.length;pi++)avgRow.getCell(3+pi*2).numFmt='#,##0';
+    ws.columns.forEach((col,i)=>col.width=i<2?(i===0?14:26):18);
+    ws.views=[{state:'frozen',ySplit:headerStart+1}];
+    const buf=await wb.xlsx.writeBuffer(),blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='detail_trx_basket_size.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);
+  }catch(e){console.error(e);alert('Excel export failed: '+e.message)}finally{btn.disabled=false;btn.textContent=old}
+}
+
+async function exportBasketJpeg(){
+  if(!S.lastResult)return alert('Klik APPLY terlebih dahulu sebelum download report.');
+  if(!window.html2canvas)return alert('JPEG library unavailable');
+  const sec=$('#basketSection'),clone=sec.cloneNode(true);
+  const actions=$('.section-actions',clone);if(actions)actions.remove();
+  const body=$('#basketSectionBody',clone);if(body)body.classList.remove('hidden');
+  clone.style.width=Math.max(sec.scrollWidth,1200)+'px';
+  const stage=document.createElement('div');stage.className='jpeg-export-stage';stage.style.cssText='position:fixed;left:-100000px;top:0;background:#fff;padding:14px;width:max-content;z-index:-1';stage.appendChild(clone);document.body.appendChild(stage);
+  try{const canvas=await html2canvas(stage,{backgroundColor:'#fff',scale:2,width:stage.scrollWidth,height:stage.scrollHeight,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});const a=document.createElement('a');a.download='detail_trx_basket_size.jpeg';a.href=canvas.toDataURL('image/jpeg',.95);a.click()}catch(e){console.error(e);alert('JPEG export failed: '+e.message)}finally{stage.remove()}
+}
+
 function normalUpdateHeaderText(){
   const rt=META?.runtime||{};if(!rt.updatedAt)return 'NO RAW DATA';
   const d=new Date(rt.updatedAt),date=d.toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta',day:'numeric',month:'short',year:'numeric'}),time=d.toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',hour12:false}).replace('.',':');
@@ -321,7 +416,7 @@ function renderUpdateHeader(){const el=$('#updatedAt');if(el)el.textContent=norm
 async function boot(){
   ME=await api('/api/auth/me');$('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;if(ME.role==='admin')$('#adminLink').classList.remove('hidden');
   META=await api('/api/meta');renderUpdateHeader();$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);
-  initState();renderFilters();renderBasketTable();
+  initState();renderFilters();renderBasketTable();setupSectionActions();
   if(META.runtime?.rowCount)await loadBasket();
 }
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
