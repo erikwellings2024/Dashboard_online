@@ -1845,6 +1845,325 @@ function itemSalesQuery(sourceRows,periods,filters,topN,metricMode='value'){
 }
 
 
+
+// Pivot Analysis -------------------------------------------------------------
+// V51: lightweight server-side pivot builder. The browser sends only the
+// selected fields/filters and receives aggregated results; raw transaction
+// rows are never sent to the client.
+const PIVOT_ROW_FIELDS = new Set([
+  'channel','store','category','brand','salesType','customerType',
+  'storeStat','sku','itemName','unitCode','date'
+]);
+const PIVOT_COLUMN_FIELDS = new Set([
+  'period','channel','store','category','brand','salesType',
+  'customerType','storeStat'
+]);
+const PIVOT_VALUE_FIELDS = new Set(['sales','trx','qty','basket']);
+const PIVOT_MAX_ROW_GROUPS = 5000;
+const PIVOT_MAX_LEAF_COLUMNS = 60;
+const PIVOT_MAX_SHOW_ROWS = 100;
+
+const PIVOT_FIELD_LABELS = {
+  channel:'Channel',
+  store:'Store',
+  category:'Category',
+  brand:'Brand',
+  salesType:'Sales Type',
+  customerType:'Customer Type',
+  storeStat:'Store Stat',
+  sku:'SKU',
+  itemName:'Item Name',
+  unitCode:'Unit Code',
+  date:'Date',
+  period:'Period',
+  sales:'Sales',
+  trx:'Trx',
+  qty:'Qty',
+  basket:'Basket Size'
+};
+
+function pivotFieldLabel(field){
+  return PIVOT_FIELD_LABELS[field] || String(field||'');
+}
+
+function pivotDimensionValue(r,field){
+  switch(field){
+    case 'channel': return String(r.channel||'UNSPECIFIED');
+    case 'store': return String(r.store||'UNSPECIFIED');
+    case 'category': return String(effectiveCategory(r)||'UNSPECIFIED');
+    case 'brand': return String(r.brand||'UNBRANDED');
+    case 'salesType': return String(r.salesType||'Regular');
+    case 'customerType': return String(r.customerType||'UNSPECIFIED');
+    case 'storeStat': return String(effectiveStoreStatus(r)||'Existing Store');
+    case 'sku': return String(r.newItemCode||r.sku||'').trim() || '(BLANK SKU)';
+    case 'itemName': return String(r.itemName||'').trim() || '(BLANK ITEM)';
+    case 'unitCode': return String(r.unitCode||'').trim() || '(BLANK UNIT)';
+    case 'date': return String(r.date||'');
+    default: return '';
+  }
+}
+
+function newPivotAgg(){
+  return {sales:0,qty:0,invoices:new Set()};
+}
+
+function addPivotAgg(agg,r){
+  agg.sales += safeNum(r.sales);
+  agg.qty += safeNum(r.qty);
+  if(r.invoice) agg.invoices.add(String(r.invoice));
+}
+
+function pivotAggValue(agg,metric){
+  if(!agg) return 0;
+  const trx=agg.invoices ? agg.invoices.size : Number(agg.trx||0);
+  if(metric==='sales') return safeNum(agg.sales);
+  if(metric==='qty') return safeNum(agg.qty);
+  if(metric==='trx') return trx;
+  if(metric==='basket') return trx ? safeNum(agg.sales)/trx : 0;
+  return 0;
+}
+
+function pivotAggPlain(agg){
+  const trx=agg?.invoices?.size || 0;
+  const sales=safeNum(agg?.sales);
+  const qty=safeNum(agg?.qty);
+  return {sales,qty,trx,basket:trx?sales/trx:0};
+}
+
+function pivotRowKey(values){
+  return JSON.stringify(values);
+}
+
+function normalizePivotRequest(body){
+  const rowFields=(Array.isArray(body.rowFields)?body.rowFields:[])
+    .map(x=>String(x||'').trim())
+    .filter(Boolean);
+  if(rowFields.length<1 || rowFields.length>2) throw new Error('PIVOT_ROW_FIELDS_INVALID');
+  if(new Set(rowFields).size!==rowFields.length) throw new Error('PIVOT_ROW_FIELDS_DUPLICATE');
+  if(rowFields.some(x=>!PIVOT_ROW_FIELDS.has(x))) throw new Error('PIVOT_ROW_FIELD_NOT_ALLOWED');
+
+  const columnField=String(body.columnField||'period').trim();
+  if(!PIVOT_COLUMN_FIELDS.has(columnField)) throw new Error('PIVOT_COLUMN_FIELD_NOT_ALLOWED');
+
+  const valueFields=(Array.isArray(body.valueFields)?body.valueFields:[])
+    .map(x=>String(x||'').trim())
+    .filter(Boolean);
+  if(valueFields.length<1 || valueFields.length>2) throw new Error('PIVOT_VALUE_FIELDS_INVALID');
+  if(new Set(valueFields).size!==valueFields.length) throw new Error('PIVOT_VALUE_FIELDS_DUPLICATE');
+  if(valueFields.some(x=>!PIVOT_VALUE_FIELDS.has(x))) throw new Error('PIVOT_VALUE_FIELD_NOT_ALLOWED');
+
+  const showRows=Math.max(10,Math.min(PIVOT_MAX_SHOW_ROWS,Number(body.showRows)||25));
+  return {rowFields,columnField,valueFields,showRows};
+}
+
+function pivotAnalysisQuery(sourceRows,periods,filters,request){
+  const {rowFields,columnField,valueFields,showRows}=normalizePivotRequest(request||{});
+  const base=filterBase(sourceRows,filters||{});
+  const firstMetric=valueFields[0];
+
+  // Pass 1: rank row groups using the Current period only. This avoids
+  // materialising a huge row x column matrix merely to find the top rows.
+  const rowRank=new Map();
+  for(const r of base){
+    if(!rowInPeriod(r,periods[0])) continue;
+    const values=rowFields.map(f=>pivotDimensionValue(r,f));
+    const key=pivotRowKey(values);
+    let entry=rowRank.get(key);
+    if(!entry){
+      if(rowRank.size>=PIVOT_MAX_ROW_GROUPS){
+        throw new Error(
+          `Pivot menghasilkan lebih dari ${PIVOT_MAX_ROW_GROUPS.toLocaleString('en-US')} row group. `+
+          `Tambahkan filter atau gunakan Row Field yang lebih ringkas.`
+        );
+      }
+      entry={key,values,agg:newPivotAgg()};
+      rowRank.set(key,entry);
+    }
+    addPivotAgg(entry.agg,r);
+  }
+
+  const ranked=[...rowRank.values()]
+    .sort((a,b)=>{
+      const av=pivotAggValue(a.agg,firstMetric);
+      const bv=pivotAggValue(b.agg,firstMetric);
+      if(bv!==av)return bv-av;
+      return a.values.join(' | ').localeCompare(b.values.join(' | '),undefined,{numeric:true,sensitivity:'base'});
+    });
+
+  const selectedRows=ranked.slice(0,showRows);
+  const selectedRowKeys=new Set(selectedRows.map(x=>x.key));
+
+  // Rank dimension values for the optional Column Field. A dynamic cap keeps
+  // the final table under the leaf-column budget (max 60 numeric columns).
+  let columnValues=[];
+  let columnValueCountAll=0;
+  let columnTruncated=false;
+
+  if(columnField!=='period'){
+    const colRank=new Map();
+    for(const r of base){
+      if(!rowInPeriod(r,periods[0])) continue;
+      const value=pivotDimensionValue(r,columnField);
+      let agg=colRank.get(value);
+      if(!agg){
+        agg=newPivotAgg();
+        colRank.set(value,agg);
+      }
+      addPivotAgg(agg,r);
+    }
+
+    const rankedCols=[...colRank.entries()]
+      .sort((a,b)=>{
+        const av=pivotAggValue(a[1],firstMetric);
+        const bv=pivotAggValue(b[1],firstMetric);
+        if(bv!==av)return bv-av;
+        return String(a[0]).localeCompare(String(b[0]),undefined,{numeric:true,sensitivity:'base'});
+      });
+
+    columnValueCountAll=rankedCols.length;
+    const maxColumnValues=Math.max(
+      1,
+      Math.min(
+        20,
+        Math.floor(PIVOT_MAX_LEAF_COLUMNS / Math.max(1,periods.length*valueFields.length))
+      )
+    );
+    columnValues=rankedCols.slice(0,maxColumnValues).map(x=>x[0]);
+    columnTruncated=rankedCols.length>columnValues.length;
+  }
+
+  const selectedColumnSet=new Set(columnValues);
+  const cellMap=new Map();
+  const grandMap=new Map();
+  const displayedMap=new Map();
+
+  function cellKey(rowKey,colValue,pi){
+    return `${rowKey}\u001f${colValue}\u001f${pi}`;
+  }
+  function totalKey(colValue,pi){
+    return `${colValue}\u001f${pi}`;
+  }
+  function getAgg(map,key){
+    let agg=map.get(key);
+    if(!agg){agg=newPivotAgg();map.set(key,agg);}
+    return agg;
+  }
+
+  // Pass 2: build only selected row groups and selected column values.
+  // A row is evaluated independently against every selected period so custom
+  // overlapping periods behave the same as the other dashboard sections.
+  for(const r of base){
+    const rowValues=rowFields.map(f=>pivotDimensionValue(r,f));
+    const rKey=pivotRowKey(rowValues);
+
+    for(let pi=0;pi<periods.length;pi++){
+      if(!rowInPeriod(r,periods[pi]))continue;
+
+      const colValue=columnField==='period'
+        ? `p${pi}`
+        : pivotDimensionValue(r,columnField);
+
+      // Grand total follows the same visible column scope. If the column field
+      // had to be truncated, omitted column values are reported in metadata.
+      if(columnField==='period' || selectedColumnSet.has(colValue)){
+        addPivotAgg(getAgg(grandMap,totalKey(colValue,pi)),r);
+      }
+
+      if(!selectedRowKeys.has(rKey))continue;
+      if(columnField!=='period' && !selectedColumnSet.has(colValue))continue;
+
+      addPivotAgg(getAgg(cellMap,cellKey(rKey,colValue,pi)),r);
+      addPivotAgg(getAgg(displayedMap,totalKey(colValue,pi)),r);
+    }
+  }
+
+  const columnGroups=[];
+  if(columnField==='period'){
+    for(let pi=0;pi<periods.length;pi++){
+      columnGroups.push({
+        key:`p${pi}`,
+        label:pi===0?'Current':`Previous ${pi}`,
+        periodIndex:pi,
+        period:periods[pi],
+        dimensionValue:null
+      });
+    }
+  }else{
+    for(const value of columnValues){
+      for(let pi=0;pi<periods.length;pi++){
+        columnGroups.push({
+          key:`${value}\u001f${pi}`,
+          label:String(value),
+          periodIndex:pi,
+          period:periods[pi],
+          dimensionValue:String(value)
+        });
+      }
+    }
+  }
+
+  const rows=selectedRows.map(entry=>{
+    const cells={};
+    if(columnField==='period'){
+      for(let pi=0;pi<periods.length;pi++){
+        const agg=cellMap.get(cellKey(entry.key,`p${pi}`,pi));
+        cells[`p${pi}`]=pivotAggPlain(agg);
+      }
+    }else{
+      for(const value of columnValues){
+        for(let pi=0;pi<periods.length;pi++){
+          const agg=cellMap.get(cellKey(entry.key,value,pi));
+          cells[`${value}\u001f${pi}`]=pivotAggPlain(agg);
+        }
+      }
+    }
+    return {key:entry.key,labels:entry.values,cells};
+  });
+
+  function totalsFromMap(map){
+    const out={};
+    if(columnField==='period'){
+      for(let pi=0;pi<periods.length;pi++){
+        out[`p${pi}`]=pivotAggPlain(map.get(totalKey(`p${pi}`,pi)));
+      }
+    }else{
+      for(const value of columnValues){
+        for(let pi=0;pi<periods.length;pi++){
+          out[`${value}\u001f${pi}`]=pivotAggPlain(map.get(totalKey(value,pi)));
+        }
+      }
+    }
+    return out;
+  }
+
+  return {
+    rowFields,
+    rowFieldLabels:rowFields.map(pivotFieldLabel),
+    columnField,
+    columnFieldLabel:pivotFieldLabel(columnField),
+    valueFields,
+    valueFieldLabels:valueFields.map(pivotFieldLabel),
+    periods,
+    columnGroups,
+    columnValues,
+    rows,
+    totalRowGroups:ranked.length,
+    shownRowGroups:rows.length,
+    rowTruncated:ranked.length>rows.length,
+    columnValueCountAll,
+    columnValueCountShown:columnField==='period'?periods.length:columnValues.length,
+    columnTruncated,
+    displayedTotal:totalsFromMap(displayedMap),
+    grandTotal:totalsFromMap(grandMap),
+    limits:{
+      maxRowGroups:PIVOT_MAX_ROW_GROUPS,
+      maxLeafColumns:PIVOT_MAX_LEAF_COLUMNS,
+      maxShowRows:PIVOT_MAX_SHOW_ROWS
+    }
+  };
+}
+
+
 function jakartaTodayParts() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Jakarta', year:'numeric', month:'2-digit', day:'2-digit'
@@ -3023,6 +3342,25 @@ app.post('/api/query/item-sales', requireAuth, async (req,res)=>{
 });
 
 
+
+app.post('/api/query/pivot-analysis', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('pivot-analysis',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      const rows=await readRowsForPeriods(periods);
+      return pivotAnalysisQuery(
+        rows,
+        periods,
+        req.body.filters||{},
+        req.body||{}
+      );
+    });
+    res.json(result);
+  }catch(e){
+    res.status(400).json({error:e.message});
+  }
+});
+
 app.post('/api/query/daily-trend', requireAuth, async (req,res)=>{
   try{
     const result=await runHeavyQuery('daily-trend',req.body,async()=>{
@@ -3350,4 +3688,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
