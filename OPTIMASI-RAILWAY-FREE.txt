@@ -1,0 +1,30 @@
+OPTIMASI RAILWAY FREE - Dashboard_online V51
+
+Tujuan:
+- Menekan pemakaian RAM agar lebih aman di Railway Free (limit 512 MB/service).
+- Tidak mengubah fitur dashboard, data, endpoint, atau struktur volume /app/data.
+
+Perubahan:
+1. Node heap dibatasi 384 MB dan GC diekspos lewat npm start.
+2. Query result cache diperkecil dari 60 -> 16 item.
+3. TTL cache dipendekkan dari 60 -> 30 detik.
+4. Memory guard otomatis membersihkan cache + GC saat RSS >= 340 MB.
+5. File monthly .json.gz dibaca melalui streaming gunzip agar buffer compressed + raw tidak menumpuk bersamaan.
+6. Row monthly didekorasi in-place saat query, sehingga tidak membuat salinan object penuh untuk setiap row.
+7. Maintenance cache berjalan tiap 60 detik dan timer tidak menahan proses hidup.
+
+Variable opsional Railway (tidak wajib dibuat):
+QUERY_CONCURRENCY=1
+QUERY_CACHE_TTL_MS=30000
+QUERY_CACHE_MAX=16
+MEMORY_GUARD_RSS_MB=340
+
+Deploy:
+- Upload/commit seluruh isi project ini ke repo yang terhubung Railway.
+- Railway akan rebuild otomatis.
+- Tidak perlu menghapus volume. Jangan hapus dashboard_online-volume.
+- Setelah deploy, cek Deploy Logs dan pastikan muncul: Railway Free memory guard: enabled
+- Pantau Metrics > Memory dan Project Settings > Usage selama 3-7 hari.
+
+Rollback:
+- Jika ada masalah, rollback deployment Railway ke versi sebelumnya. Data di volume tidak diubah oleh optimasi ini.

@@ -14,8 +14,6 @@ const ExcelJS = require('exceljs');
 const zlib = require('zlib');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
-const { promisify } = require('util');
-const gunzipAsync = promisify(zlib.gunzip);
 
 const app = express();
 // Railway runs the app behind a reverse proxy.
@@ -177,8 +175,10 @@ let dataWriteOwner=null;
 // Only a small number of raw-data aggregations may run simultaneously.
 // Identical requests are cached briefly so multiple viewers can share results.
 const QUERY_CONCURRENCY = Math.max(1, Number(process.env.QUERY_CONCURRENCY || 1));
-const QUERY_CACHE_TTL_MS = Math.max(5000, Number(process.env.QUERY_CACHE_TTL_MS || 60000));
-const QUERY_CACHE_MAX = Math.max(10, Number(process.env.QUERY_CACHE_MAX || 60));
+const QUERY_CACHE_TTL_MS = Math.max(5000, Number(process.env.QUERY_CACHE_TTL_MS || 30000));
+const QUERY_CACHE_MAX = Math.max(4, Number(process.env.QUERY_CACHE_MAX || 16));
+// Free-tier guard: keep enough headroom below a 512 MB container limit.
+const MEMORY_GUARD_RSS_MB = Math.max(192, Number(process.env.MEMORY_GUARD_RSS_MB || 340));
 let activeHeavyQueries = 0;
 const heavyQueryQueue = [];
 const queryResultCache = new Map();
@@ -229,6 +229,7 @@ async function runHeavyQuery(name,body,fn){
     const value=await fn();
     queryResultCache.set(key,{at:Date.now(),value});
     pruneQueryCache();
+    memoryGuard('after-query');
     return value;
   });
 }
@@ -238,6 +239,22 @@ function invalidateQueryCache(){
   queryResultCache.clear();
 }
 
+function memoryGuard(reason='periodic'){
+  const rssMb=process.memoryUsage().rss/1048576;
+  if(rssMb < MEMORY_GUARD_RSS_MB) return;
+  const before=queryResultCache.size;
+  queryResultCache.clear();
+  if(typeof global.gc==='function') global.gc();
+  const afterMb=process.memoryUsage().rss/1048576;
+  console.log(`[MEMORY] guard ${reason}: rss ${rssMb.toFixed(1)} MB -> ${afterMb.toFixed(1)} MB; cache cleared=${before}`);
+}
+
+// Do not let expired cache entries linger during long idle periods.
+const memoryMaintenanceTimer=setInterval(()=>{
+  pruneQueryCache();
+  memoryGuard('timer');
+},60000);
+memoryMaintenanceTimer.unref?.();
 
 async function readJson(file, fallback) {
   try { return JSON.parse(await fsp.readFile(file, 'utf8')); }
@@ -266,16 +283,28 @@ async function fileExists(file) {
   catch { return false; }
 }
 
+async function readGzipJsonArray(file) {
+  // Stream compressed bytes through gunzip instead of keeping both the entire
+  // .gz file and the uncompressed Buffer in RAM at the same time. JSON.parse
+  // still needs the final text, but this removes one large temporary copy.
+  const gunzip=zlib.createGunzip();
+  const input=fs.createReadStream(file);
+  input.pipe(gunzip);
+  let text='';
+  gunzip.setEncoding('utf8');
+  for await (const chunk of gunzip) text += chunk;
+  const rows=JSON.parse(text);
+  text='';
+  return Array.isArray(rows)?rows:[];
+}
+
 async function readMonthRows(key) {
   const gz=monthPath(key);
   const json=monthJsonPath(key);
 
   if (await fileExists(gz)) {
     try {
-      const compressed=await fsp.readFile(gz);
-      const raw=await gunzipAsync(compressed);
-      const rows=JSON.parse(raw.toString('utf8'));
-      return Array.isArray(rows)?rows:[];
+      return await readGzipJsonArray(gz);
     } catch(e) {
       console.error(`[STORAGE] Failed reading ${gz}:`,e.message);
       // Fallback to legacy JSON if it still exists.
@@ -328,9 +357,7 @@ async function migrateMonthlyStorageToGzip() {
 async function readLegacyCache() {
   if(await fileExists(RAW_CACHE_GZ_FILE)){
     try{
-      const raw=await gunzipAsync(await fsp.readFile(RAW_CACHE_GZ_FILE));
-      const rows=JSON.parse(raw.toString('utf8'));
-      return Array.isArray(rows)?rows:[];
+      return await readGzipJsonArray(RAW_CACHE_GZ_FILE);
     }catch(e){console.error('[STORAGE] legacy gzip read failed:',e.message)}
   }
   return readJson(RAW_CACHE_FILE,[]);
@@ -408,9 +435,22 @@ async function readRowsForPeriods(periods) {
     const monthRows=await readMonthRows(key);
     if(!Array.isArray(monthRows) || !monthRows.length) continue;
     for(const row of monthRows){
-      // Store / PT / Store Stat / Channel master changes are applied dynamically.
-      const r=redecorateRow(row);
-      if(periods.some(p=>rowInPeriod(r,p))) rows.push(r);
+      // Each monthly file is freshly parsed for this query, so it is safe to
+      // decorate that object in-place. Avoiding {...row} here prevents a second
+      // full copy of every selected row in memory.
+      const rawStore=row.rawStore || row.store;
+      const rawChannel=row.rawChannel || row.channel;
+      const store=canonicalStore(rawStore);
+      const rawCategory=row.rawCategory!==undefined?row.rawCategory:row.category;
+      row.rawStore=rawStore;
+      row.rawChannel=rawChannel;
+      row.rawCategory=rawCategory;
+      row.category=mapCategory(rawCategory);
+      row.store=store.name;
+      row.pt=store.pt;
+      row.storeStat=store.storeStatus;
+      row.channel=canonicalChannel(rawChannel);
+      if(periods.some(p=>rowInPeriod(row,p))) rows.push(row);
     }
   }
   return rows;
@@ -3688,4 +3728,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));

@@ -5,8 +5,8 @@
   "description": "Role-based online sales monitoring dashboard with Excel upload, admin master data, independent section filters, charts, and exports.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "NODE_ENV=development node server.js",
+    "start": "node --expose-gc --max-old-space-size=384 server.js",
+    "dev": "NODE_ENV=development node --expose-gc --max-old-space-size=384 server.js",
     "check": "node --check server.js && node --check public/dashboard.js && node --check public/admin.js && node --check public/login.js"
   },
   "engines": {
