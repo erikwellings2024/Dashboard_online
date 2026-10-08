@@ -9,8 +9,10 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
-const XLSX = require('xlsx');
-const ExcelJS = require('exceljs');
+// V52: xlsx + exceljs (~40 MB RAM) are loaded lazily, only when an Excel upload is processed.
+let _XLSX=null, _ExcelJS=null;
+function getXLSX(){ return _XLSX || (_XLSX=require('xlsx')); }
+function getExcelJS(){ return _ExcelJS || (_ExcelJS=require('exceljs')); }
 const zlib = require('zlib');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
@@ -18,6 +20,9 @@ const { Readable } = require('stream');
 const app = express();
 // Railway runs the app behind a reverse proxy.
 app.set('trust proxy', 1);
+// V52: track activity so an idle process can release memory back to the OS.
+let lastActivityAt=Date.now(), idleGcDone=false;
+app.use((req,res,next)=>{ lastActivityAt=Date.now(); idleGcDone=false; next(); });
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const ROOT = __dirname;
@@ -253,6 +258,12 @@ function memoryGuard(reason='periodic'){
 const memoryMaintenanceTimer=setInterval(()=>{
   pruneQueryCache();
   memoryGuard('timer');
+  // V52: one full GC after 2 idle minutes returns freed heap pages to the OS.
+  if(!idleGcDone && Date.now()-lastActivityAt>=120000 && activeHeavyQueries===0){
+    idleGcDone=true;
+    queryResultCache.clear();
+    if(typeof global.gc==='function') global.gc();
+  }
 },60000);
 memoryMaintenanceTimer.unref?.();
 
@@ -734,8 +745,12 @@ function safeNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function excelDateToISO(v) {
   if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
   if (typeof v === 'number') {
-    const d = XLSX.SSF.parse_date_code(v);
-    if (d) return `${String(d.y).padStart(4,'0')}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+    // V52: Excel 1900 serial date -> ISO without loading the xlsx library.
+    if (Number.isFinite(v) && v >= 61 && v < 2958466) {
+      let days = Math.floor(v);
+      if ((v - days) * 86400 > 86399.9999) days++; // same rounding as xlsx SSF
+      return new Date(Date.UTC(1899,11,30) + days*86400000).toISOString().slice(0,10);
+    }
   }
   const s = String(v || '').trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
@@ -1051,7 +1066,7 @@ async function normalizeXlsxZipDescriptors(filePath){
 
 async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
   // Determine RAW/first sheet without expanding worksheet XML into JS objects.
-  const metaWb = XLSX.readFile(filePath,{bookSheets:true});
+  const metaWb = getXLSX().readFile(filePath,{bookSheets:true});
   const selectedSheet = metaWb.SheetNames.includes('RAW') ? 'RAW' : metaWb.SheetNames[0];
   if (!selectedSheet) throw new Error('RAW_FORMAT_INVALID. Workbook has no worksheet.');
 
@@ -1072,7 +1087,7 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
   const required=['transaction_date','invoice_no','store_location','item_name','brand','category_2','customer_type','trader_check','sub_total'];
   const channelColumns=['telemed_check','TELEMED','telemed','channel_dashboard','channel_type'];
 
-  const reader=new ExcelJS.stream.xlsx.WorkbookReader(filePath,{
+  const reader=new (getExcelJS()).stream.xlsx.WorkbookReader(filePath,{
     entries:'emit',
     sharedStrings:'cache',
     hyperlinks:'ignore',
@@ -3728,4 +3743,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
