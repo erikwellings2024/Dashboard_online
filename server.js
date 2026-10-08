@@ -38,7 +38,7 @@ const METABASE_SESSION_FILE = path.join(DATA_DIR, 'metabase-session.enc.json');
 const MONTHLY_DIR = path.join(DATA_DIR, 'monthly');
 const MONTH_INDEX_FILE = path.join(DATA_DIR, 'month-index.json');
 const META_INDEX_FILE = path.join(DATA_DIR, 'meta-index.json');
-const STORAGE_START_MONTH = '2026-01';
+const STORAGE_START_MONTH = '2025-01'; // V53: 2025 history enabled
 const STORAGE_END_MONTH = '2028-12';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || 'false').toLowerCase() === 'true';
@@ -408,7 +408,7 @@ function storageMonthKeys() {
 }
 
 async function ensureMonthlyFolders() {
-  for (const y of ['2026','2027','2028']) await fsp.mkdir(path.join(MONTHLY_DIR,y), {recursive:true});
+  for (const y of ['2025','2026','2027','2028']) await fsp.mkdir(path.join(MONTHLY_DIR,y), {recursive:true});
 }
 
 async function readAllMonthlyRows() {
@@ -3195,7 +3195,7 @@ function uploadPolicy() {
     today:t.iso,
     currentMonth:t.monthKey,
     mode:'MONTHLY_REPLACE_ANYTIME',
-    rule:'Any month from 2026-01 through 2028-12 may be uploaded or replaced at any time. Excel must contain exactly one selected month.'
+    rule:'Any month from 2025-01 through 2028-12 may be uploaded or replaced at any time. Excel must contain exactly one selected month.'
   };
 }
 
@@ -3743,4 +3743,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
