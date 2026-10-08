@@ -1806,3 +1806,11 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 .hr-report tbody tr:not(.hr-total):hover td{background:#f5f8fc}
 .hr-report td.hr-red{color:#C00000}
 .hr-report tr.hr-total td{background:#BDD7EE;font-weight:700;border-top:2px solid #8fb3d9}
+
+/* V57 Rejection Excel import */
+.hr-import-box{margin-top:14px}
+.hr-import-summary{margin:10px 0;font-size:13px}
+.hr-map-table{min-width:0;max-width:900px}
+.hr-map-table select{min-width:220px}
+.hr-map-table tr.hr-unmatched td{background:#fff4e5}
+#hrGrandOverride{width:110px;text-align:right}

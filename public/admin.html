@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20261008-56"></head>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20261008-57"></head>
 <body>
 <header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT/Store Stat, target online/category, mapping category, auto update sales, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
 <main class="admin-page">
@@ -72,9 +72,19 @@
 <div class="hr-week-label" id="hrWeekLabel">-</div>
 <div class="muted-mini" id="hrUpdated"></div>
 <div class="table-wrap" style="margin-top:10px"><table class="admin-table hr-table" id="hrTable"><thead><tr><th>Store</th><th>Order</th><th>Reject</th><th>Reject %</th></tr></thead><tbody></tbody>
-<tfoot><tr><th>GRAND TOTAL</th><th colspan="2" id="hrGrandNote" class="muted-mini"></th><th id="hrGrand">-</th></tr></tfoot></table></div>
+<tfoot><tr><th>GRAND TOTAL</th><th colspan="2" id="hrGrandNote" class="muted-mini"></th><th id="hrGrand">-</th></tr>
+<tr><th>GRAND TOTAL OVERRIDE (%)</th><th colspan="2" class="muted-mini">Opsional. Diisi otomatis dari import Excel; kosongkan agar dihitung sistem.</th><th><input id="hrGrandOverride" inputmode="decimal" placeholder="-"></th></tr></tfoot></table></div>
 <div class="hr-actions"><button class="btn green" id="hrSave" type="button">Save Week</button><button class="btn" id="hrClear" type="button">Clear Week</button><span id="hrMsg"></span></div>
 <div style="margin-top:12px"><label class="muted-mini"><b>Minggu yang sudah terisi (klik untuk membuka):</b></label><div class="chips" id="hrFilled"></div></div>
+</div>
+<div class="admin-box hr-import-box"><h2>Import dari Excel</h2>
+<p>Upload file rekap Halodoc Rejection Anda (format: kolom pertama nama store, satu baris header berisi <b>W1, W2, ...</b>, baris <b>Grand Total</b> di bawah). Nilai boleh berupa persen (3%) atau desimal (0.03). Sel kosong = belum ada data. Minggu yang ada di file akan <b>menggantikan</b> data minggu yang sama di dashboard.</p>
+<div class="form-row hr-controls">
+<div><label>Tahun (untuk nomor W)</label><input id="hrImportYear" type="number" min="2024" max="2030"></div>
+<div><label>File Excel</label><input id="hrImportFile" type="file" accept=".xlsx,.xls,.xlsm,.csv"></div>
+<div><label>Sheet</label><select id="hrImportSheet" disabled><option>-</option></select></div>
+</div>
+<div id="hrImportPreview"></div>
 </div></section>
 <section class="admin-panel" id="tab-target"><div class="admin-box"><h2>Target Online Setup</h2><p>Target Best Est Online disimpan per bulan dan per channel. Pilih bulan, isi target, lalu Save.</p><div class="form-row"><div><label>Target Month</label><input id="targetConfigMonth" type="month" value="2026-09"></div><div><button class="btn" id="loadTarget">Load Month</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="targetTable"><thead><tr><th>Channel</th><th>Target Best Est</th></tr></thead><tbody></tbody></table></div><button class="btn green" id="saveTarget">Save Target</button><div id="targetMsg"></div></div></section>
 <section class="admin-panel" id="tab-targetCategory"><div class="admin-box"><h2>Target Category Setup</h2><p>Target Best Est Category disimpan per bulan berdasarkan Category hasil Mapping Category.</p><div class="form-row"><div><label>Target Month</label><input id="categoryTargetConfigMonth" type="month" value="2026-09"></div><div><button class="btn" id="loadCategoryTarget">Load Month</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="categoryTargetTable"><thead><tr><th>Category</th><th>Target Best Est</th></tr></thead><tbody></tbody></table></div><button class="btn green" id="saveCategoryTarget">Save Target Category</button><div id="categoryTargetMsg"></div></div></section>
@@ -143,4 +153,4 @@
 </div>
 </section>
 <section class="admin-panel" id="tab-users"><div class="admin-box"><h2>User Management</h2><p>Admin dapat membuat akun Admin/Guest, reset password, ubah role, aktif/nonaktifkan, dan menghapus user. Guest tidak memiliki akses ke halaman ini.</p><div class="form-row"><div><label>Username</label><input id="newUsername"></div><div><label>Display Name</label><input id="newDisplayName"></div><div><label>Password</label><input id="newPassword" type="password"></div><div><label>Role</label><select id="newRole"><option value="guest">Guest</option><option value="admin">Admin</option></select></div><div><button class="btn green" id="addUser">Add User</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="userTable"><thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Active</th><th>New Password</th><th>Action</th></tr></thead><tbody></tbody></table></div><div id="userMsg"></div></div></section>
-</main><script src="/admin.js?v=20261008-53"></script><script src="/admin-halodoc.js?v=20261008-56"></script></body></html>
+</main><script src="/admin.js?v=20261008-53"></script><script src="/admin-halodoc.js?v=20261008-57"></script></body></html>
