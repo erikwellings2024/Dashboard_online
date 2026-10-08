@@ -17,7 +17,7 @@
   <div class="form-row upload-controls monthly-controls">
     <div>
       <label>Month Folder</label>
-      <select id="uploadMonth"><option value="">Loading months...</option></select><div id="monthSelectorInfo" class="muted-mini" style="margin-top:4px">Loading Jan 2026 – Dec 2028...</div>
+      <select id="uploadMonth"><option value="">Loading months...</option></select><div id="monthSelectorInfo" class="muted-mini" style="margin-top:4px">Loading Jan 2025 – Dec 2028...</div>
     </div>
     <div>
       <label>Raw Excel — one month only</label>
@@ -38,10 +38,10 @@
   <div id="uploadMsg"></div>
   <div id="runtimeInfo" style="margin-top:10px;font-size:11px"></div>
 
-  <h3 class="subhead">Monthly Data Folder — Jan 2026 to Dec 2028</h3>
+  <h3 class="subhead">Monthly Data Folder — Jan 2025 to Dec 2028</h3>
   <div class="month-toolbar">
     <label>Show Year</label>
-    <select id="monthYear"><option>2026</option><option>2027</option><option>2028</option></select>
+    <select id="monthYear"><option>2025</option><option selected>2026</option><option>2027</option><option>2028</option></select>
     <span class="month-legend"><b class="badge open">DATA</b> available / editable &nbsp; <b class="badge empty">NO DATA</b> not uploaded yet</span>
   </div>
   <div class="table-wrap">
@@ -129,4 +129,4 @@
 </div>
 </section>
 <section class="admin-panel" id="tab-users"><div class="admin-box"><h2>User Management</h2><p>Admin dapat membuat akun Admin/Guest, reset password, ubah role, aktif/nonaktifkan, dan menghapus user. Guest tidak memiliki akses ke halaman ini.</p><div class="form-row"><div><label>Username</label><input id="newUsername"></div><div><label>Display Name</label><input id="newDisplayName"></div><div><label>Password</label><input id="newPassword" type="password"></div><div><label>Role</label><select id="newRole"><option value="guest">Guest</option><option value="admin">Admin</option></select></div><div><button class="btn green" id="addUser">Add User</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="userTable"><thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Active</th><th>New Password</th><th>Action</th></tr></thead><tbody></tbody></table></div><div id="userMsg"></div></div></section>
-</main><script src="/admin.js?v=20260922-48"></script></body></html>
+</main><script src="/admin.js?v=20261008-53"></script></body></html>
