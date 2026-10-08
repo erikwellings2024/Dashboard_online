@@ -3595,6 +3595,7 @@ app.get('/api/admin/halodoc-rejection', requireAdmin, (req,res)=>{
   const w=isoWeekFromKey(req.query.week)||isoWeekOf(new Date().toISOString().slice(0,10));
   const saved=halodocRejection.weeks[w.key]||{};
   res.json({week:w,threshold:halodocRejection.threshold,stores:rejectionStoreNames(),entries:saved.stores||{},
+    grandOverride:Number.isFinite(saved.grandRate)?saved.grandRate:null,
     updatedAt:saved.updatedAt||null,updatedBy:saved.updatedBy||null,
     filledWeeks:Object.keys(halodocRejection.weeks).filter(k=>Object.keys(halodocRejection.weeks[k].stores||{}).length).sort()});
 });
@@ -3608,13 +3609,45 @@ app.put('/api/admin/halodoc-rejection', requireAdmin, async (req,res)=>{
       if(c)stores[n]=c;
     }
     if(req.body?.threshold!==undefined){const t=Number(req.body.threshold);if(!Number.isFinite(t)||t<0||t>1)throw new Error('Threshold tidak valid.');halodocRejection.threshold=t}
-    if(Object.keys(stores).length)halodocRejection.weeks[w.key]={stores,updatedAt:new Date().toISOString(),updatedBy:req.user.username};
+    let grandRate=null;
+    if(req.body?.grandOverride!==undefined&&req.body.grandOverride!==null&&req.body.grandOverride!==''){
+      grandRate=Number(req.body.grandOverride);if(!Number.isFinite(grandRate)||grandRate<0||grandRate>1)throw new Error('Grand Total override tidak valid.');
+    }
+    if(Object.keys(stores).length){halodocRejection.weeks[w.key]={stores,updatedAt:new Date().toISOString(),updatedBy:req.user.username};if(grandRate!==null)halodocRejection.weeks[w.key].grandRate=grandRate}
     else delete halodocRejection.weeks[w.key];
     await writeJsonAtomic(HALODOC_REJECTION_FILE,halodocRejection);
     invalidateQueryCache();
-    res.json({ok:true,week:w,saved:Object.keys(stores).length,grandRate:weekGrandRate(stores)});
+    res.json({ok:true,week:w,saved:Object.keys(stores).length,grandRate:grandRate!==null?grandRate:weekGrandRate(stores)});
   }catch(e){res.status(400).json({error:e.message})}
 });
+// V57: bulk import from the Admin's existing Excel recap (parsed in the browser).
+app.post('/api/admin/halodoc-rejection/import', requireAdmin, async (req,res)=>{
+  try{
+    const incoming=req.body?.weeks;if(!incoming||typeof incoming!=='object')throw new Error('Data import kosong.');
+    const keys=Object.keys(incoming);if(!keys.length)throw new Error('Tidak ada minggu yang diimport.');if(keys.length>110)throw new Error('Maksimal 110 minggu per import.');
+    const next={};let cells=0;
+    for(const key of keys){
+      const w=isoWeekFromKey(key);if(!w)throw new Error(`Week ${key} tidak valid.`);
+      const src=incoming[key]||{},stores={};
+      for(const [name,e] of Object.entries(src.stores||{})){
+        const n=String(name).trim().toUpperCase();if(!n)continue;
+        let c;try{c=cleanRejectionEntry(e)}catch(err){throw new Error(`${key} ${n}: ${err.message}`)}
+        if(c){stores[n]=c;cells++}
+      }
+      if(!Object.keys(stores).length)continue;
+      const rec={stores,updatedAt:new Date().toISOString(),updatedBy:`${req.user.username} (import)`};
+      const g=src.grandRate;
+      if(g!==undefined&&g!==null&&g!==''){const gv=Number(g);if(!Number.isFinite(gv)||gv<0||gv>1)throw new Error(`${key}: Grand Total tidak valid.`);rec.grandRate=gv}
+      next[key]=rec;
+    }
+    const replaced=Object.keys(next).filter(k=>halodocRejection.weeks[k]).length;
+    Object.assign(halodocRejection.weeks,next);
+    await writeJsonAtomic(HALODOC_REJECTION_FILE,halodocRejection);
+    invalidateQueryCache();
+    res.json({ok:true,weeks:Object.keys(next).length,replaced,cells});
+  }catch(e){res.status(400).json({error:e.message})}
+});
+
 app.post('/api/query/halodoc-rejection', requireAuth, (req,res)=>{
   try{
     const p=normalizePeriods([req.body?.period])[0];
@@ -3624,7 +3657,9 @@ app.post('/api/query/halodoc-rejection', requireAuth, (req,res)=>{
     const cols=weeks.map(w=>{
       const st=halodocRejection.weeks[w.key]?.stores||{};
       const sel=Object.fromEntries(Object.entries(st).filter(([n])=>!filter||filter.has(n)));
-      return {...w,label:`W${w.week}`,range:`${Number(w.monday.slice(8))}-${Number(w.sunday.slice(8))}`,hasData:Object.keys(sel).length>0,grandRate:weekGrandRate(sel),entries:sel};
+      const ov=halodocRejection.weeks[w.key]?.grandRate;
+      const useOv=Number.isFinite(ov)&&(!filter||Object.keys(st).every(n=>filter.has(n)));
+      return {...w,label:`W${w.week}`,range:`${Number(w.monday.slice(8))}-${Number(w.sunday.slice(8))}`,hasData:Object.keys(sel).length>0,grandRate:useOv?ov:weekGrandRate(sel),entries:sel};
     });
     const stores=allStores.filter(n=>(!filter||filter.has(n))&&cols.some(c=>c.entries[n]));
     res.json({period:p,threshold:halodocRejection.threshold,stores,allStores,
@@ -4012,4 +4047,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
