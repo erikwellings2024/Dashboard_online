@@ -145,11 +145,13 @@ function syncMulti(f){
   const ta=$('.toggle-all',f);if(ta)ta.checked=values.length===$$('.option input',f).length;
 }
 function bindFilters(){
-  $$('.multi .control').forEach(btn=>btn.onclick=e=>{e.stopPropagation();const f=btn.closest('.multi');$$('.multi.open,.range.open,.product-picker.open').forEach(x=>x!==f&&x.classList.remove('open'));f.classList.toggle('open')});
-  $$('.toggle-all').forEach(cb=>cb.onchange=()=>{const f=cb.closest('.multi');$$('.option input',f).forEach(x=>x.checked=cb.checked);syncMulti(f)});
-  $$('.option input').forEach(cb=>cb.onchange=()=>syncMulti(cb.closest('.multi')));
-  $$('.search-input').forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.oninput=()=>{const q=inp.value.toLowerCase();$$('.option',inp.closest('.drop')).forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'flex':'none')}});
-  $$('.range').forEach(setupRange);
+  // V54: scoped to Section A so Section B (Online Report) controls keep their own state.
+  const root=$('#basketFilters');
+  $$('.multi .control',root).forEach(btn=>btn.onclick=e=>{e.stopPropagation();const f=btn.closest('.multi');$$('.multi.open,.range.open,.product-picker.open').forEach(x=>x!==f&&x.classList.remove('open'));f.classList.toggle('open')});
+  $$('.toggle-all',root).forEach(cb=>cb.onchange=()=>{const f=cb.closest('.multi');$$('.option input',f).forEach(x=>x.checked=cb.checked);syncMulti(f)});
+  $$('.option input',root).forEach(cb=>cb.onchange=()=>syncMulti(cb.closest('.multi')));
+  $$('.search-input',root).forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.oninput=()=>{const q=inp.value.toLowerCase();$$('.option',inp.closest('.drop')).forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'flex':'none')}});
+  $$('.range',root).forEach(setupRange);
   $$('.prev1-hide').forEach(btn=>btn.onclick=e=>{e.preventDefault();e.stopPropagation();S.prevCount=0;renderFilters();S.lastResult=null;renderBasketTable()});
   $$('.prev1-show').forEach(btn=>btn.onclick=e=>{e.preventDefault();e.stopPropagation();S.prevCount=Math.max(1,S.prevCount);renderFilters();S.lastResult=null;renderBasketTable()});
   $$('.prev2-hide').forEach(btn=>btn.onclick=e=>{e.preventDefault();e.stopPropagation();S.prevCount=1;renderFilters();S.lastResult=null;renderBasketTable()});
@@ -159,7 +161,7 @@ function bindFilters(){
   bindProductPicker();
 }
 function bindProductPicker(){
-  const picker=$('.product-picker');if(!picker)return;
+  const picker=$('#basketFilters .product-picker');if(!picker)return;
   const inp=$('.product-input',picker),drop=$('.product-suggest',picker),opts=$('.product-options',picker),info=$('.product-suggest-info',picker),clear=$('.product-clear',picker);
   let timer=null,requestSeq=0;
   const close=()=>picker.classList.remove('open'),open=()=>picker.classList.add('open');
@@ -417,6 +419,7 @@ async function boot(){
   ME=await api('/api/auth/me');$('#userChip').textContent=`${ME.displayName||ME.username} • ${ME.role.toUpperCase()}`;if(ME.role==='admin')$('#adminLink').classList.remove('hidden');
   META=await api('/api/meta');renderUpdateHeader();$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);
   initState();renderFilters();renderBasketTable();setupSectionActions();
+  if(window.OnlineReport)window.OnlineReport.init(META);
   if(META.runtime?.rowCount)await loadBasket();
 }
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};

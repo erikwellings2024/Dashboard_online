@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Detail Trx & Basket Size</title>
-  <link rel="stylesheet" href="/app.css?v=20260925-50">
+  <link rel="stylesheet" href="/app.css?v=20261008-54">
 </head>
 <body>
 <header class="topbar">
@@ -59,10 +59,38 @@
     </div>
   </section>
 
+  <section class="section" id="onlineSection">
+    <div class="section-head">
+      <div class="section-title">
+        <span class="section-no">B</span>
+        <div>
+          <h2>Online Report Tabel</h2>
+          <p>Sales, Trx, ABV, Target, vs LY &amp; vs LM per channel online. Create Chart: Online vs Offline per bulan dan kontribusi per channel</p>
+        </div>
+      </div>
+      <div class="section-actions">
+        <button class="btn section-toggle-btn" id="onlineHideBtn" type="button">Hide</button>
+        <button class="btn blue" id="onlineChartBtn" type="button">Create Chart</button>
+        <div class="download-wrap" id="onlineDownloadWrap">
+          <button class="btn download-btn" id="onlineDownloadBtn" type="button">Download Report ▾</button>
+          <div class="download-menu">
+            <button id="onlineExportExcel" type="button">Download Excel</button>
+            <button id="onlineExportJpeg" type="button">Download JPEG</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body" id="onlineSectionBody">
+      <div class="section-filter" id="onlineFilters"></div>
+      <div id="onlineTable" class="table-wrap or-wrap"><div class="empty">Klik APPLY untuk menampilkan Online Report.</div></div>
+    </div>
+  </section>
+
   <div class="footer">% = jumlah Trx pada basket-size band ÷ total Trx pada periode setelah filter diterapkan.</div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="/trx-bs.js?v=20260925-50"></script>
+<script src="/online-report.js?v=20261008-54"></script>
+<script src="/trx-bs.js?v=20261008-54"></script>
 </body>
 </html>

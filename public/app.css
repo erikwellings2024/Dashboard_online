@@ -1745,3 +1745,22 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 @media(max-width:720px){
   .pivot-builder-grid{grid-template-columns:1fr}
 }
+
+/* V54 Section B - Online Report Tabel */
+#onlineSection{margin-top:14px}
+.or-wrap{padding:12px 10px;overflow-x:auto}
+.or-table{border-collapse:collapse;min-width:900px;font-family:Arial,sans-serif;border:2px solid #333}
+.or-table th{background:#548235;color:#fff;font-weight:700;font-size:15px;padding:8px 10px;border:1px solid #fff;text-align:center;line-height:1.25}
+.or-table th:first-child{text-align:center;min-width:170px}
+.or-table td{padding:6px 10px;font-size:15px;font-weight:700;text-align:right;border-left:1px solid #fff;border-right:1px solid #fff;white-space:nowrap;color:#111}
+.or-table tbody tr:nth-child(odd):not(.or-total):not(.or-contr):not(.or-spacer) td{background:#d9d9d9}
+.or-table tbody tr:nth-child(even):not(.or-total):not(.or-contr):not(.or-spacer) td{background:#e4e6f2}
+.or-table td.or-ch{text-align:left}
+.or-table td.or-red{color:#ff0000}
+.or-table tr.or-total td,.or-table tr.or-contr td{background:#548235;color:#fff;border-top:1px solid #fff}
+.or-table tr.or-total td.or-ch{text-align:center}
+.or-table tr.or-contr td{text-align:center}
+.or-table tr.or-contr td.or-ch{text-align:left}
+.or-table tr.or-spacer td{background:#fff;height:12px;padding:0}
+.or-note{margin-top:8px;font-size:11px;color:#667085}
+#onlineFilters input[type=date].control,#onlineFilters input[type=month].control{cursor:text}
