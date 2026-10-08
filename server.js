@@ -3490,6 +3490,61 @@ async function onlineReportQuery(body){
   };
 }
 
+// V55 Online Grafik per Channel (Detail Trx & BS Section C) ---------------
+async function onlineChannelQuery(body){
+  const period=normalizePeriods([body.period])[0];
+  const known=new Set(activeChannels().map(c=>c.name));
+  const channels=arr(body.channels).map(x=>x.toUpperCase()).filter(x=>known.has(x));
+  if(!channels.length)throw new Error('Pilih minimal 1 channel.');
+  const topN=Math.max(1,Math.min(20,Number(body.topN)||5));
+  const filters={...(body.filters||{})};delete filters.channels;
+  let chartTo=/^\d{4}-\d{2}$/.test(body.chartTo||'')?body.chartTo:monthKey(period.end);
+  let chartFrom=/^\d{4}-\d{2}$/.test(body.chartFrom||'')?body.chartFrom:`${chartTo.slice(0,4)}-01`;
+  if(chartFrom>chartTo)[chartFrom,chartTo]=[chartTo,chartFrom];
+  let months=monthListInclusive(chartFrom,chartTo);if(months.length>24)months=months.slice(-24);
+
+  const chSet=new Set(channels);
+  const monthly=new Map(months.map(k=>[k,Object.fromEntries(channels.map(c=>[c,0]))]));
+  const items=new Map(channels.map(c=>[c,new Map()]));
+  const periodSales=Object.fromEntries(channels.map(c=>[c,0]));
+  const keys=new Set(months);for(const k of monthKeysInRange(period.start,period.end))keys.add(k);
+  for(const key of [...keys].sort()){
+    if(!monthAllowed(key))continue;
+    let monthRows=await readMonthRows(key);
+    if(!Array.isArray(monthRows)||!monthRows.length)continue;
+    for(const r of monthRows)decorateStoredRow(r);
+    const rows=filterBase(monthRows,filters);monthRows=null;
+    const mm=monthly.get(key);
+    for(const r of rows){
+      if(!chSet.has(r.channel))continue;
+      const v=safeNum(r.sales);
+      if(mm)mm[r.channel]+=v;
+      if(rowInPeriod(r,period)){
+        periodSales[r.channel]+=v;
+        const sku=String(r.newItemCode||r.sku||'').trim(),name=String(r.itemName||'').trim(),k=`${sku}|${name}`;
+        const im=items.get(r.channel);const it=im.get(k);
+        if(it)it.sales+=v;else im.set(k,{sku,itemName:name,sales:v});
+      }
+    }
+    if(typeof global.gc==='function' && process.memoryUsage().rss/1048576>200)global.gc();
+  }
+  return {
+    period,months,topN,
+    channels:channels.map(c=>{
+      const total=periodSales[c];
+      const top=[...items.get(c).values()].sort((a,b)=>b.sales-a.sales).slice(0,topN).map(x=>({...x,contr:total?x.sales/total:null}));
+      return {channel:c,periodSales:total,
+        monthly:months.map(k=>{const sales=monthly.get(k)[c],target=safeNum((config.targets?.[k]||{})[c]);return {month:k,sales,target,achievement:target?sales/target:null}}),
+        items:top};
+    })
+  };
+}
+
+app.post('/api/query/online-channel', requireAuth, async (req,res)=>{
+  try{res.json(await runHeavyQuery('online-channel',req.body,()=>onlineChannelQuery(req.body||{})))}
+  catch(e){res.status(400).json({error:e.message})}
+});
+
 app.post('/api/query/online-report', requireAuth, async (req,res)=>{
   try{
     const result=await runHeavyQuery('online-report',req.body,()=>onlineReportQuery(req.body||{}));
@@ -3864,4 +3919,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
