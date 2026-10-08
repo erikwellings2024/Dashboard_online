@@ -1814,3 +1814,18 @@ th.sort-desc .sort-mark span:first-child{opacity:.25}
 .hr-map-table select{min-width:220px}
 .hr-map-table tr.hr-unmatched td{background:#fff4e5}
 #hrGrandOverride{width:110px;text-align:right}
+
+/* V58 JPEG (Mobile): narrow export, filter chips wrap */
+.jpeg-export-stage.jpeg-mobile{padding:4px !important}
+.jpeg-export-stage.jpeg-mobile .jpeg-report-header{box-sizing:border-box}
+.jpeg-export-stage.jpeg-mobile .jpeg-filter-summary{gap:4px 6px}
+.jpeg-export-stage.jpeg-mobile .jpeg-filter-chip{font-size:11px;padding:3px 6px}
+
+/* V59 Dashboard: tables fit their data (no forced full-screen width).
+   Section 8 (Top Items by Sales) keeps its own content-based width rules. */
+body.dash-fit .export-section:not(#itemSalesSection) .table-wrap > table,
+body.dash-fit .export-section:not(#itemSalesSection) .rank-box table,
+body.dash-fit .export-section:not(#itemSalesSection) .compact-table,
+body.dash-fit .export-section:not(#itemSalesSection) .month-table{width:auto !important;min-width:0 !important}
+body.dash-fit .export-section .rank-grid{display:flex !important;flex-wrap:wrap;align-items:flex-start;gap:12px}
+body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100%;overflow-x:auto}

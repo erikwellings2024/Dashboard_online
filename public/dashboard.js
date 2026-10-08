@@ -1323,7 +1323,7 @@ function sortRows(table,col,clickedHeader){
 
 // Report exports
 $$('.download-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();b.parentElement.classList.toggle('open')});
-$$('[data-export]').forEach(b=>b.onclick=()=>{const sec=b.closest('.export-section');b.closest('.download-wrap').classList.remove('open');b.dataset.export==='excel'?exportExcel(sec):exportJpeg(sec)});
+$$('[data-export]').forEach(b=>b.onclick=()=>{const sec=b.closest('.export-section');b.closest('.download-wrap').classList.remove('open');b.dataset.export==='excel'?exportExcel(sec):exportJpeg(sec,b.dataset.export==='jpeg-mobile')});
 function tableArea(sec){return $('.rank-grid',sec)||$('.table-wrap',sec)}
 function jpegFilterPairs(sec){
   const pairs=[];
@@ -1380,7 +1380,7 @@ function jpegFilterPairs(sec){
   return pairs;
 }
 
-async function exportJpeg(sec){
+async function exportJpeg(sec,mobile=false){
   if(!window.html2canvas)return alert('JPEG library unavailable');
 
   const area=tableArea(sec);
@@ -1404,19 +1404,26 @@ async function exportJpeg(sec){
     </div>`;
 
   const stage=document.createElement('div');
-  stage.className='jpeg-export-stage';
-  stage.style.cssText='position:fixed;left:-100000px;top:0;background:#fff;padding:14px;width:max-content;z-index:-1';
-  stage.appendChild(header);
+  stage.className='jpeg-export-stage'+(mobile?' jpeg-mobile':'');
+  stage.style.cssText='position:fixed;left:-100000px;top:0;background:#fff;padding:'+(mobile?'4px':'14px')+';width:max-content;z-index:-1';
   stage.appendChild(clone);
   document.body.appendChild(stage);
 
-  const reportWidth=Math.max(
-    900,
-    area.scrollWidth||0,
-    clone.scrollWidth||0,
-    area.getBoundingClientRect().width||0
-  );
+  // V59: same fit-to-data rules as on screen (auto-layout tables only; Section 8
+  // uses a fixed layout with its own content-based width). Ranking tables sit
+  // side by side; in Mobile they stack vertically for a portrait image.
+  $$('table',clone).forEach(t=>{if(getComputedStyle(t).tableLayout!=='fixed'){t.style.width='auto';t.style.minWidth='0'}});
+  clone.style.minWidth='0';
+  if(mobile){clone.style.padding='0';clone.style.margin='0';clone.style.border='0'}
+  const isGrid=clone.classList.contains('rank-grid');
+  if(isGrid){clone.style.display='flex';clone.style.flexWrap='nowrap';clone.style.flexDirection=mobile?'column':'row';clone.style.alignItems='flex-start';clone.style.gap='12px';$$('.rank-box',clone).forEach(b=>{b.style.flex='0 0 auto';b.style.overflow='visible'})}
+  clone.style.width='max-content';
+  const tw=$$('table',clone).map(t=>Math.ceil(t.getBoundingClientRect().width));
+  const fitW=isGrid||!tw.length?Math.ceil(clone.scrollWidth||0):Math.max(...tw);
+  const reportWidth=mobile?fitW:Math.max(900,fitW); // Mobile: exactly the table width, no side space
+  clone.style.width=reportWidth+'px';
   header.style.width=reportWidth+'px';
+  stage.insertBefore(header,clone);
 
   const canvas=await html2canvas(stage,{
     backgroundColor:'#fff',
@@ -1430,7 +1437,7 @@ async function exportJpeg(sec){
   stage.remove();
 
   const a=document.createElement('a');
-  a.download=safeName(title)+'.jpeg';
+  a.download=safeName(title)+(mobile?'_mobile':'')+'.jpeg';
   a.href=canvas.toDataURL('image/jpeg',.95);
   a.click();
 }
