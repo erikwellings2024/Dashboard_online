@@ -595,6 +595,7 @@ function monthSlots() {
 
 async function bootstrap() {
   config = await readJson(CONFIG_FILE, null);
+  await loadHalodocRejection();
   if (!config) {
     config = DEFAULT_CONFIG;
   }
@@ -3540,6 +3541,98 @@ async function onlineChannelQuery(body){
   };
 }
 
+// V56 Halodoc Rejection (manual weekly input by Admin) ---------------------
+// Weeks are ISO weeks (Monday-Sunday). A week belongs to the month of its
+// Thursday, e.g. 2026-W01 = 29 Dec 2025 - 4 Jan 2026 -> JAN 2026.
+const HALODOC_REJECTION_FILE=path.join(DATA_DIR,'halodoc-rejection.json');
+let halodocRejection={threshold:0.02,weeks:{}};
+function isoWeekOf(iso){
+  const [y,m,d]=String(iso).split('-').map(Number);
+  const dt=new Date(Date.UTC(y,m-1,d));const dow=(dt.getUTCDay()+6)%7;
+  const thu=new Date(dt.getTime()+(3-dow)*86400000);const wy=thu.getUTCFullYear();
+  const jan4=new Date(Date.UTC(wy,0,4));const jan4dow=(jan4.getUTCDay()+6)%7;
+  const w1mon=new Date(jan4.getTime()-jan4dow*86400000);
+  const wn=Math.floor((thu.getTime()-w1mon.getTime())/(7*86400000))+1;
+  const mon=new Date(dt.getTime()-dow*86400000),sun=new Date(mon.getTime()+6*86400000);
+  return {key:`${wy}-W${String(wn).padStart(2,'0')}`,year:wy,week:wn,
+    monday:mon.toISOString().slice(0,10),sunday:sun.toISOString().slice(0,10),month:thu.toISOString().slice(0,7)};
+}
+function isoWeekFromKey(key){
+  const m=/^(\d{4})-W(\d{2})$/.exec(String(key||''));if(!m)return null;
+  const jan4=new Date(Date.UTC(Number(m[1]),0,4)),dow=(jan4.getUTCDay()+6)%7;
+  const mon=new Date(jan4.getTime()-dow*86400000+(Number(m[2])-1)*7*86400000);
+  const w=isoWeekOf(mon.toISOString().slice(0,10));return w.key===key?w:null;
+}
+function rejectionWeeksInRange(start,end){
+  const out=[];let w=isoWeekOf(start);
+  while(w.monday<=end && out.length<160){out.push(w);const next=new Date(Date.parse(w.monday+'T00:00:00Z')+7*86400000);w=isoWeekOf(next.toISOString().slice(0,10))}
+  return out;
+}
+function cleanRejectionEntry(e){
+  const num=v=>v===''||v===null||v===undefined||!Number.isFinite(Number(v))?null:Number(v);
+  const order=num(e?.order),reject=num(e?.reject);let rate=num(e?.rate);
+  if(order!==null&&order>0&&reject!==null){if(reject<0||reject>order)throw new Error('Reject tidak boleh lebih besar dari Order.');rate=reject/order}
+  if(rate===null)return null;
+  if(rate<0||rate>1)throw new Error('Reject % harus di antara 0% dan 100%.');
+  return {order:order!==null&&order>0?order:null,reject:order!==null&&order>0?reject:null,rate};
+}
+function weekGrandRate(entries){
+  const vals=Object.values(entries||{}).filter(Boolean);if(!vals.length)return null;
+  if(vals.every(v=>v.order>0&&v.reject!==null)){const o=vals.reduce((t,v)=>t+v.order,0),r=vals.reduce((t,v)=>t+v.reject,0);return o?r/o:null}
+  return vals.reduce((t,v)=>t+v.rate,0)/vals.length;
+}
+async function loadHalodocRejection(){
+  const d=await readJson(HALODOC_REJECTION_FILE,null);
+  if(d&&typeof d==='object')halodocRejection={threshold:Number.isFinite(Number(d.threshold))?Number(d.threshold):0.02,weeks:d.weeks&&typeof d.weeks==='object'?d.weeks:{}};
+}
+function rejectionStoreNames(){
+  const names=new Set((config.stores||[]).filter(s=>s.active).map(s=>s.name));
+  for(const w of Object.values(halodocRejection.weeks))for(const n of Object.keys(w.stores||{}))names.add(n);
+  return [...names].sort((a,b)=>a.localeCompare(b));
+}
+
+app.get('/api/admin/halodoc-rejection', requireAdmin, (req,res)=>{
+  const w=isoWeekFromKey(req.query.week)||isoWeekOf(new Date().toISOString().slice(0,10));
+  const saved=halodocRejection.weeks[w.key]||{};
+  res.json({week:w,threshold:halodocRejection.threshold,stores:rejectionStoreNames(),entries:saved.stores||{},
+    updatedAt:saved.updatedAt||null,updatedBy:saved.updatedBy||null,
+    filledWeeks:Object.keys(halodocRejection.weeks).filter(k=>Object.keys(halodocRejection.weeks[k].stores||{}).length).sort()});
+});
+app.put('/api/admin/halodoc-rejection', requireAdmin, async (req,res)=>{
+  try{
+    const w=isoWeekFromKey(req.body?.week);if(!w)throw new Error('Week tidak valid.');
+    const stores={};
+    for(const [name,e] of Object.entries(req.body?.entries||{})){
+      const n=String(name).trim();if(!n)continue;
+      let c;try{c=cleanRejectionEntry(e)}catch(err){throw new Error(`${n}: ${err.message}`)}
+      if(c)stores[n]=c;
+    }
+    if(req.body?.threshold!==undefined){const t=Number(req.body.threshold);if(!Number.isFinite(t)||t<0||t>1)throw new Error('Threshold tidak valid.');halodocRejection.threshold=t}
+    if(Object.keys(stores).length)halodocRejection.weeks[w.key]={stores,updatedAt:new Date().toISOString(),updatedBy:req.user.username};
+    else delete halodocRejection.weeks[w.key];
+    await writeJsonAtomic(HALODOC_REJECTION_FILE,halodocRejection);
+    invalidateQueryCache();
+    res.json({ok:true,week:w,saved:Object.keys(stores).length,grandRate:weekGrandRate(stores)});
+  }catch(e){res.status(400).json({error:e.message})}
+});
+app.post('/api/query/halodoc-rejection', requireAuth, (req,res)=>{
+  try{
+    const p=normalizePeriods([req.body?.period])[0];
+    const weeks=rejectionWeeksInRange(p.start,p.end);
+    const wanted=arr(req.body?.stores);const filter=wanted.length?new Set(wanted):null;
+    const allStores=rejectionStoreNames();
+    const cols=weeks.map(w=>{
+      const st=halodocRejection.weeks[w.key]?.stores||{};
+      const sel=Object.fromEntries(Object.entries(st).filter(([n])=>!filter||filter.has(n)));
+      return {...w,label:`W${w.week}`,range:`${Number(w.monday.slice(8))}-${Number(w.sunday.slice(8))}`,hasData:Object.keys(sel).length>0,grandRate:weekGrandRate(sel),entries:sel};
+    });
+    const stores=allStores.filter(n=>(!filter||filter.has(n))&&cols.some(c=>c.entries[n]));
+    res.json({period:p,threshold:halodocRejection.threshold,stores,allStores,
+      weeks:cols.map(c=>({key:c.key,label:c.label,range:c.range,month:c.month,monday:c.monday,sunday:c.sunday,hasData:c.hasData,grandRate:c.grandRate,
+        rates:Object.fromEntries(stores.map(n=>[n,c.entries[n]?c.entries[n].rate:null]))}))});
+  }catch(e){res.status(400).json({error:e.message})}
+});
+
 app.post('/api/query/online-channel', requireAuth, async (req,res)=>{
   try{res.json(await runHeavyQuery('online-channel',req.body,()=>onlineChannelQuery(req.body||{})))}
   catch(e){res.status(400).json({error:e.message})}
@@ -3919,4 +4012,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
