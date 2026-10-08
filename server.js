@@ -433,6 +433,22 @@ function monthIndexTotals() {
   return {rowCount,minDate,maxDate};
 }
 
+function decorateStoredRow(row){
+  const rawStore=row.rawStore || row.store;
+  const rawChannel=row.rawChannel || row.channel;
+  const store=canonicalStore(rawStore);
+  const rawCategory=row.rawCategory!==undefined?row.rawCategory:row.category;
+  row.rawStore=rawStore;
+  row.rawChannel=rawChannel;
+  row.rawCategory=rawCategory;
+  row.category=mapCategory(rawCategory);
+  row.store=store.name;
+  row.pt=store.pt;
+  row.storeStat=store.storeStatus;
+  row.channel=canonicalChannel(rawChannel);
+  return row;
+}
+
 async function readRowsForPeriods(periods) {
   const keys=new Set();
   for(const p of periods){
@@ -449,18 +465,7 @@ async function readRowsForPeriods(periods) {
       // Each monthly file is freshly parsed for this query, so it is safe to
       // decorate that object in-place. Avoiding {...row} here prevents a second
       // full copy of every selected row in memory.
-      const rawStore=row.rawStore || row.store;
-      const rawChannel=row.rawChannel || row.channel;
-      const store=canonicalStore(rawStore);
-      const rawCategory=row.rawCategory!==undefined?row.rawCategory:row.category;
-      row.rawStore=rawStore;
-      row.rawChannel=rawChannel;
-      row.rawCategory=rawCategory;
-      row.category=mapCategory(rawCategory);
-      row.store=store.name;
-      row.pt=store.pt;
-      row.storeStat=store.storeStatus;
-      row.channel=canonicalChannel(rawChannel);
+      decorateStoredRow(row);
       if(periods.some(p=>rowInPeriod(row,p))) rows.push(row);
     }
   }
@@ -3245,6 +3250,10 @@ app.get('/api/meta', requireAuth, (req,res)=>{
 
   res.json({
     channels:activeChannels().map(c=>c.name),
+    channelGroups:{
+      online:activeChannels().filter(c=>c.telemed).map(c=>c.name),
+      offline:activeChannels().filter(c=>!c.telemed).map(c=>c.name)
+    },
     stores,
     pts:['EFM','EFIT','ESB'],
     storeStats:['Existing Store','New Store'],
@@ -3374,6 +3383,118 @@ app.post('/api/query/trx-basket-size', requireAuth, async (req,res)=>{
   }catch(e){
     res.status(400).json({error:e.message,rows:e.rows||undefined});
   }
+});
+
+// V54 Online Report (Detail Trx & BS Section B) ----------------------------
+// Streams month files one at a time and aggregates immediately, so a 12-24
+// month chart never holds more than one month of raw rows in memory.
+function shiftIsoMonthsClamped(iso,offset){
+  const [y,m,d]=String(iso).split('-').map(Number);
+  const target=new Date(Date.UTC(y,m-1+offset,1));
+  const ty=target.getUTCFullYear(),tm=target.getUTCMonth();
+  const last=new Date(Date.UTC(ty,tm+1,0)).getUTCDate();
+  return `${ty}-${String(tm+1).padStart(2,'0')}-${String(Math.min(d,last)).padStart(2,'0')}`;
+}
+function shiftPeriodMonths(p,offset){
+  const endIsMonthEnd=Number(p.end.slice(8,10))===daysInMonth(p.end);
+  let end=shiftIsoMonthsClamped(p.end,offset);
+  if(endIsMonthEnd) end=`${end.slice(0,8)}${String(daysInMonth(end)).padStart(2,'0')}`;
+  return {start:shiftIsoMonthsClamped(p.start,offset),end};
+}
+function monthListInclusive(from,to){
+  const out=[];let [y,m]=from.split('-').map(Number);const [ty,tm]=to.split('-').map(Number);
+  while(y<ty || (y===ty && m<=tm)){out.push(`${y}-${String(m).padStart(2,'0')}`);m++;if(m>12){m=1;y++}if(out.length>36)break}
+  return out;
+}
+function proratedTarget(channel,period){
+  let total=0;
+  for(const key of monthKeysInRange(period.start,period.end)){
+    const t=safeNum((config.targets?.[key]||{})[channel]);
+    if(!t)continue;
+    const mStart=`${key}-01`,mEnd=`${key}-${String(daysInMonth(mStart)).padStart(2,'0')}`;
+    const a=period.start>mStart?period.start:mStart,b=period.end<mEnd?period.end:mEnd;
+    total+=t*daysInclusive(a,b)/daysInMonth(mStart);
+  }
+  return total;
+}
+
+async function onlineReportQuery(body){
+  const period=normalizePeriods([body.period])[0];
+  const known=new Set(activeChannels().map(c=>c.name));
+  const online=arr(body.onlineChannels).map(x=>x.toUpperCase()).filter(x=>known.has(x));
+  const offline=arr(body.offlineChannels).map(x=>x.toUpperCase()).filter(x=>known.has(x)&&!online.includes(x));
+  if(!online.length)throw new Error('Pilih minimal 1 channel online.');
+  const filters={...(body.filters||{})};delete filters.channels;
+
+  const periods=[period,shiftPeriodMonths(period,-1),shiftPeriodMonths(period,-12)]; // current, LM, LY
+  const endKey=monthKey(period.end);
+  let chartTo=/^\d{4}-\d{2}$/.test(body.chartTo||'')?body.chartTo:endKey;
+  let chartFrom=/^\d{4}-\d{2}$/.test(body.chartFrom||'')?body.chartFrom:`${chartTo.slice(0,4)}-01`;
+  if(chartFrom>chartTo)[chartFrom,chartTo]=[chartTo,chartFrom];
+  let chartMonths=monthListInclusive(chartFrom,chartTo);
+  if(chartMonths.length>24)chartMonths=chartMonths.slice(-24);
+
+  const onlineSet=new Set(online),offlineSet=new Set(offline);
+  const per=periods.map(()=>({ch:new Map(),onInv:new Set(),offSales:0,offInv:new Set()}));
+  const chart=new Map(chartMonths.map(k=>[k,{month:k,offline:0,online:0,channels:Object.fromEntries(online.map(c=>[c,0]))}]));
+
+  const keys=new Set(chartMonths);
+  for(const p of periods)for(const k of monthKeysInRange(p.start,p.end))keys.add(k);
+  for(const key of [...keys].sort()){
+    if(!monthAllowed(key))continue;
+    let monthRows=await readMonthRows(key);
+    if(!Array.isArray(monthRows)||!monthRows.length)continue;
+    for(const r of monthRows)decorateStoredRow(r);
+    const rows=filterBase(monthRows,filters);
+    monthRows=null;
+    const cm=chart.get(key);
+    for(const r of rows){
+      const isOn=onlineSet.has(r.channel),isOff=offlineSet.has(r.channel);
+      if(!isOn&&!isOff)continue;
+      const v=safeNum(r.sales);
+      if(cm){
+        if(isOn){cm.online+=v;cm.channels[r.channel]+=v}
+        else cm.offline+=v;
+      }
+      for(let i=0;i<periods.length;i++){
+        if(!rowInPeriod(r,periods[i]))continue;
+        const a=per[i];
+        if(isOn){
+          let c=a.ch.get(r.channel);if(!c){c={sales:0,inv:new Set()};a.ch.set(r.channel,c)}
+          c.sales+=v;if(i===0&&r.invoice){c.inv.add(r.invoice);a.onInv.add(r.invoice)}
+        }else{a.offSales+=v;if(i===0&&r.invoice)a.offInv.add(r.invoice)}
+      }
+    }
+    if(typeof global.gc==='function' && process.memoryUsage().rss/1048576>200)global.gc();
+  }
+
+  const salesOf=(i,c)=>per[i].ch.get(c)?.sales||0;
+  const ratio=(a,b)=>b?a/b:null;
+  const rows=online.map(c=>{
+    const sales=salesOf(0,c),trx=per[0].ch.get(c)?.inv.size||0,target=proratedTarget(c,period);
+    return {channel:c,sales,trx,abv:trx?sales/trx:0,target,vsTarget:ratio(sales,target),
+      lySales:salesOf(2,c),lmSales:salesOf(1,c),vsLY:ratio(sales,salesOf(2,c)),vsLM:ratio(sales,salesOf(1,c))};
+  });
+  const sum=(i)=>online.reduce((t,c)=>t+salesOf(i,c),0);
+  const onSales=sum(0),onTrx=per[0].onInv.size,onTarget=rows.reduce((t,r)=>t+r.target,0);
+  const offTarget=offline.reduce((t,c)=>t+proratedTarget(c,period),0);
+  const total={sales:onSales,trx:onTrx,abv:onTrx?onSales/onTrx:0,target:onTarget,vsTarget:ratio(onSales,onTarget),
+    lySales:sum(2),lmSales:sum(1),vsLY:ratio(onSales,sum(2)),vsLM:ratio(onSales,sum(1))};
+  const offlineTotal={sales:per[0].offSales,trx:per[0].offInv.size,target:offTarget};
+  const fullMonth=period.start.slice(8)==='01'&&Number(period.end.slice(8))===daysInMonth(period.end)&&monthKey(period.start)===monthKey(period.end);
+  return {
+    period,lmPeriod:periods[1],lyPeriod:periods[2],fullMonth,
+    online,offline,rows,total,offlineTotal,
+    contribution:{sales:ratio(onSales,onSales+per[0].offSales),target:ratio(onTarget,onTarget+offTarget)},
+    chart:chartMonths.map(k=>chart.get(k))
+  };
+}
+
+app.post('/api/query/online-report', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('online-report',req.body,()=>onlineReportQuery(req.body||{}));
+    res.json(result);
+  }catch(e){res.status(400).json({error:e.message})}
 });
 
 app.post('/api/query/item-sales', requireAuth, async (req,res)=>{
@@ -3743,4 +3864,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
