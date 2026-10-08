@@ -147,8 +147,10 @@
       const max=Math.max(...D.chart.map(m=>m.online),1),gw=cw/n,bw=gw*0.78;
       x.strokeStyle='#bbb';x.beginPath();x.moveTo(L,T+ch);x.lineTo(W-R,T+ch);x.stroke();
       D.chart.forEach((m,i)=>{const bx=L+i*gw+(gw-bw)/2;let y=T+ch;
+        // V54.1: label only the 2 highest channels of each month.
+        const top2=new Set(Object.entries(m.channels).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e=>e[0]));
         D.order.forEach(c=>{const v=m.channels[c]||0,h=ch*v/max;if(h<=0)return;x.fillStyle=D.colors[c];x.fillRect(bx,y-h,bw,h);
-          const share=m.online?v/m.online:0;if(share>=0.1&&h>=18){const big=share>=0.5,size=big?Math.min(30,Math.max(16,h*0.22)):Math.min(17,Math.max(12,h*0.4));label(x,Math.round(share*100)+'%',bx+bw/2,y-h/2,size,big?'#1f2a44':'#fff')}
+          const share=m.online?v/m.online:0;if(top2.has(c)){const big=share>=0.5,size=big?Math.min(30,Math.max(16,h*0.22)):Math.min(17,Math.max(10,h*0.4));label(x,Math.round(share*100)+'%',bx+bw/2,y-h/2,size,big?'#1f2a44':'#fff')}
           y-=h});
         x.font='bold 13px Arial';x.fillStyle='#444';x.textAlign='center';x.fillText(D.labels[i],bx+bw/2,T+ch+22);x.textAlign='left'});
       legend(x,D.order.map(c=>[c,D.colors[c]]),W,H-20)})();
