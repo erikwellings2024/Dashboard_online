@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Detail Trx & Basket Size</title>
-  <link rel="stylesheet" href="/app.css?v=20261008-54">
+  <link rel="stylesheet" href="/app.css?v=20261008-55">
 </head>
 <body>
 <header class="topbar">
@@ -86,11 +86,39 @@
     </div>
   </section>
 
+  <section class="section" id="channelGraphSection">
+    <div class="section-head">
+      <div class="section-title">
+        <span class="section-no">C</span>
+        <div>
+          <h2>Online Grafik per Channel</h2>
+          <p>Target Achievement per bulan dan item pareto (Top SKU) untuk setiap channel online yang dipilih</p>
+        </div>
+      </div>
+      <div class="section-actions">
+        <button class="btn section-toggle-btn" id="channelGraphHideBtn" type="button">Hide</button>
+        <button class="btn blue" id="channelGraphChartBtn" type="button">Create Chart</button>
+        <div class="download-wrap" id="channelGraphDownloadWrap">
+          <button class="btn download-btn" id="channelGraphDownloadBtn" type="button">Download Report ▾</button>
+          <div class="download-menu">
+            <button id="channelGraphExportExcel" type="button">Download Excel</button>
+            <button id="channelGraphExportJpeg" type="button">Download JPEG</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body" id="channelGraphSectionBody">
+      <div class="section-filter" id="channelGraphFilters"></div>
+      <div id="channelGraphBody" class="oc-body"><div class="empty">Klik APPLY untuk menampilkan item pareto per channel.</div></div>
+    </div>
+  </section>
+
   <div class="footer">% = jumlah Trx pada basket-size band ÷ total Trx pada periode setelah filter diterapkan.</div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="/online-report.js?v=20261008-541"></script>
-<script src="/trx-bs.js?v=20261008-54"></script>
+<script src="/online-channel.js?v=20261008-55"></script>
+<script src="/trx-bs.js?v=20261008-55"></script>
 </body>
 </html>

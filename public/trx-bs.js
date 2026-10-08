@@ -420,6 +420,7 @@ async function boot(){
   META=await api('/api/meta');renderUpdateHeader();$('#noData').classList.toggle('hidden',!!META.runtime?.rowCount);
   initState();renderFilters();renderBasketTable();setupSectionActions();
   if(window.OnlineReport)window.OnlineReport.init(META);
+  if(window.OnlineChannelGraph)window.OnlineChannelGraph.init(META);
   if(META.runtime?.rowCount)await loadBasket();
 }
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
