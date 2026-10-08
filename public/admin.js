@@ -194,8 +194,8 @@ function initAutoSyncPeriodControls(){
   if(start && !start.value)start.value=dateOnlyLocal(prevStart);
   if(end && !end.value)end.value=dateOnlyLocal(prevEnd);
 
-  if(start){start.min='2026-01-01';start.max=todayText}
-  if(end){end.min='2026-01-01';end.max=todayText}
+  if(start){start.min='2025-01-01';start.max=todayText}
+  if(end){end.min='2025-01-01';end.max=todayText}
 
   $$('input[name="autoSyncPeriodMode"]').forEach(r=>r.onchange=()=>{
     const manual=syncPeriodMode()==='manual';
@@ -307,7 +307,7 @@ function renderUploadPolicy(){
   const p=META?.uploadPolicy;if(!p)return;
   $('#uploadPolicy').innerHTML=
     `<b>Monthly Storage Policy</b> &nbsp; `+
-    `Tidak ada monthly closing. Admin dapat upload / replace bulan mana pun dari <b>Jan 2026 sampai Dec 2028</b> kapan saja. `+
+    `Tidak ada monthly closing. Admin dapat upload / replace bulan mana pun dari <b>Jan 2025 sampai Dec 2028</b> kapan saja. `+
     `File Excel harus berisi tepat satu bulan yang sama dengan Month Folder yang dipilih.`;
 }
 
@@ -318,7 +318,7 @@ function monthName(key){
 
 function fallbackMonthSlots(){
   const out=[];
-  for(let y=2026;y<=2028;y++){
+  for(let y=2025;y<=2028;y++){
     for(let m=1;m<=12;m++){
       out.push({
         month:`${y}-${String(m).padStart(2,'0')}`,
@@ -343,7 +343,7 @@ function initMonthSelect(){
   const preferred=slots.find(s=>s.month===p.currentMonth) || slots.find(s=>s.month==='2026-09') || slots[0];
   if(preferred)el.value=preferred.month;
   const info=$('#monthSelectorInfo');
-  if(info) info.textContent=`${slots.length} month folders available • Jan 2026 – Dec 2028 • any month can be replaced anytime`;
+  if(info) info.textContent=`${slots.length} month folders available • Jan 2025 – Dec 2028 • any month can be replaced anytime`;
 }
 
 function renderMonthStorage(){
