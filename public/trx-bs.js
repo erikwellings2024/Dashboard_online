@@ -421,6 +421,7 @@ async function boot(){
   initState();renderFilters();renderBasketTable();setupSectionActions();
   if(window.OnlineReport)window.OnlineReport.init(META);
   if(window.OnlineChannelGraph)window.OnlineChannelGraph.init(META);
+  if(window.HalodocRejection)window.HalodocRejection.init(META);
   if(META.runtime?.rowCount)await loadBasket();
 }
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
