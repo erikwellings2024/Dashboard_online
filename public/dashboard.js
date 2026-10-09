@@ -92,7 +92,7 @@ S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.r
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
-S.pivot={periods:clone(p),prevCount:2,product:'',productLabel:'',items:[],sortBy:'current_desc',showGrowth:true,showShare:false,subtotals:false,showOthers:true,rowFields:['channel',''],columnField:'period',valueFields:['sales','trx'],showRows:25,loaded:false,filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.pivot={periods:clone(p),prevCount:2,product:'',productLabel:'',items:[],sortBy:'current_desc',showGrowth:true,showShare:false,subtotals:false,showOthers:true,rowFields:['store',''],columnField:'period',valueFields:['sales',''],showRows:25,advancedOpen:false,loaded:false,filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
 function rangeControl(section,key,label,period){
@@ -266,7 +266,7 @@ function renderPivotItemChips(){
   const items=S.pivot.items||[];
   box.innerHTML=items.length
     ?`${items.map((it,i)=>`<span class="pivot-item-chip" title="${esc(it.sku||'')} ${esc(it.itemName||'')}">${esc(it.itemName||it.sku)}${it.sku&&it.itemName?`<small>${esc(it.sku)}</small>`:''}<button type="button" data-i="${i}" aria-label="Hapus">×</button></span>`).join('')}<button type="button" class="pivot-item-clear">Hapus semua (${items.length})</button>`
-    :`<span class="pivot-item-empty">Belum ada item dipilih — semua item dihitung (bisa melebihi batas 5.000 row group).</span>`;
+    :`<span class="pivot-item-empty">Belum ada item dipilih — semua item dihitung (bisa melebihi batas 60.000 row group).</span>`;
   $$('button[data-i]',box).forEach(b=>b.onclick=()=>{S.pivot.items.splice(Number(b.dataset.i),1);renderPivotItemChips();refreshPivotItemResults()});
   const clr=$('.pivot-item-clear',box);if(clr)clr.onclick=()=>{S.pivot.items=[];renderPivotItemChips();refreshPivotItemResults()};
 }
@@ -324,103 +324,129 @@ function bindPivotItemPicker(){
   document.addEventListener('click',()=>{const b=$('#pivotItemResults');if(b)b.classList.remove('open')});
 }
 
+// V61 Pivot builder in Excel "PivotTable Fields" style: tick a field and it goes to
+// Rows (dimensions) or Values (measures); chips can be dragged between areas; the
+// table refreshes automatically after every change.
+const PIVOT_MEASURE_KEYS=PIVOT_VALUES.map(x=>x[0]);
+const PIVOT_COLUMN_KEYS=PIVOT_COLUMN_DIMENSIONS.map(x=>x[0]).filter(k=>k!=='period');
+const pivotLabel=k=>([...PIVOT_DIMENSIONS,...PIVOT_VALUES,['period','Period']].find(x=>x[0]===k)||[k,k])[1];
+const pivotRows=()=>S.pivot.rowFields.filter(Boolean);
+const pivotVals=()=>S.pivot.valueFields.filter(Boolean);
+function setPivotRows(list){S.pivot.rowFields=[list[0]||'',list[1]||'']}
+function setPivotVals(list){S.pivot.valueFields=[list[0]||'',list[1]||'']}
+function pivotWhere(k){if(pivotRows().includes(k))return 'rows';if(S.pivot.columnField===k)return 'columns';if(pivotVals().includes(k))return 'values';return ''}
+function pivotRemove(k){
+  setPivotRows(pivotRows().filter(x=>x!==k));setPivotVals(pivotVals().filter(x=>x!==k));
+  if(S.pivot.columnField===k)S.pivot.columnField='period';
+}
+function pivotPlace(k,area){
+  const isMeasure=PIVOT_MEASURE_KEYS.includes(k);
+  if(area==='values'&&!isMeasure)return 'Field ini bukan angka, jadi tidak bisa masuk Values.';
+  if(area!=='values'&&isMeasure)return 'Sales / Trx / Qty / Basket Size hanya bisa masuk Values.';
+  if(area==='columns'&&k!=='period'&&!PIVOT_COLUMN_KEYS.includes(k))return `${pivotLabel(k)} tidak bisa dijadikan Column (terlalu banyak nilai). Taruh di Rows.`;
+  if(area==='rows'&&!pivotRows().includes(k)&&pivotRows().filter(x=>x!==k).length>=2)return 'Rows maksimal 2 field. Hapus salah satu dulu.';
+  if(area==='values'&&!pivotVals().includes(k)&&pivotVals().length>=2)return 'Values maksimal 2 field. Hapus salah satu dulu.';
+  if(area==='columns'&&k==='period'){pivotRemove(S.pivot.columnField);S.pivot.columnField='period';return ''}
+  pivotRemove(k);
+  if(area==='rows')setPivotRows([...pivotRows(),k]);
+  if(area==='values')setPivotVals([...pivotVals(),k]);
+  if(area==='columns')S.pivot.columnField=k;
+  if(S.pivot.rowFields.filter(Boolean).length<2)S.pivot.subtotals=false;
+  return '';
+}
+function pivotToggleField(k,on){
+  if(!on){pivotRemove(k);return ''}
+  if(PIVOT_MEASURE_KEYS.includes(k))return pivotPlace(k,'values');
+  if(pivotRows().length<2)return pivotPlace(k,'rows');
+  if(S.pivot.columnField==='period'&&PIVOT_COLUMN_KEYS.includes(k))return pivotPlace(k,'columns');
+  return 'Rows sudah 2 field. Hapus salah satu atau drag field ini ke Columns.';
+}
+function pivotChip(k,area){
+  const fixed=area==='columns'&&k==='period';
+  return `<span class="pv-chip ${PIVOT_MEASURE_KEYS.includes(k)?'pv-chip-val':''}" draggable="true" data-field="${k}" data-area="${area}">${area==='values'?'Σ ':''}${esc(pivotLabel(k))}${fixed?'':`<button type="button" class="pv-chip-x" data-field="${k}" title="Hapus">×</button>`}</span>`;
+}
 function renderPivotBuilder(){
-  const p=S.pivot;
-  const row1=p.rowFields[0]||'channel';
-  const row2=p.rowFields[1]||'';
-  const value1=p.valueFields[0]||'sales';
-  const value2=p.valueFields[1]||'';
-
+  const p=S.pivot,rows=pivotRows(),vals=pivotVals();
+  const fieldRow=([k,label],measure)=>{const w=pivotWhere(k);return `<label class="pv-field ${w?'on':''}" draggable="true" data-field="${k}"><input type="checkbox" data-pv-field="${k}" ${w?'checked':''}><span>${measure?'Σ ':''}${esc(label)}</span>${w?`<em>${w==='rows'?'Rows':w==='columns'?'Columns':'Values'}</em>`:''}</label>`};
+  const adv=p.advancedOpen;
   $('#pivotBuilder').innerHTML=`
-    <div class="pivot-builder-grid">
-      <div class="pivot-zone">
-        <div class="pivot-zone-title">ROW FIELDS <span>max 2</span></div>
-        <div class="pivot-builder-row">
-          <label>Row 1</label>
-          <select class="control pivot-builder-select" data-pivot-key="row1">${pivotOptionList(PIVOT_DIMENSIONS,row1)}</select>
-        </div>
-        <div class="pivot-builder-row">
-          <label>Row 2</label>
-          <select class="control pivot-builder-select" data-pivot-key="row2">${pivotOptionList(PIVOT_DIMENSIONS,row2,true)}</select>
-        </div>
-        ${pivotUsesItem()?pivotItemPickerHtml():''}
+    <div class="pv-layout">
+      <div class="pv-fields">
+        <div class="pv-title">PIVOTTABLE FIELDS <span>centang / drag</span></div>
+        <div class="pv-field-group">${PIVOT_DIMENSIONS.map(x=>fieldRow(x,false)).join('')}</div>
+        <div class="pv-field-group pv-measures">${PIVOT_VALUES.map(x=>fieldRow(x,true)).join('')}</div>
       </div>
-
-      <div class="pivot-zone">
-        <div class="pivot-zone-title">COLUMN FIELD <span>max 1</span></div>
-        <div class="pivot-builder-row">
-          <label>Column</label>
-          <select class="control pivot-builder-select" data-pivot-key="column">${pivotOptionList(PIVOT_COLUMN_DIMENSIONS,p.columnField)}</select>
-        </div>
-        <p class="pivot-zone-note">Period paling ringan. Field lain tetap dibandingkan Current / Previous.</p>
+      <div class="pv-areas">
+        <div class="pv-area" data-drop="columns"><div class="pv-area-title">▥ COLUMNS</div><div class="pv-drop">${pivotChip(p.columnField||'period','columns')}</div></div>
+        <div class="pv-area" data-drop="rows"><div class="pv-area-title">☰ ROWS <span>maks 2</span>${rows.length===2?`<button type="button" class="pv-swap" title="Tukar urutan Rows">⇅ tukar</button>`:''}</div><div class="pv-drop">${rows.map(k=>pivotChip(k,'rows')).join('')||'<span class="pv-hint">Centang field Store, Brand, Item, dll.</span>'}</div>
+          ${pivotUsesItem()?pivotItemPickerHtml():''}</div>
+        <div class="pv-area" data-drop="values"><div class="pv-area-title">Σ VALUES <span>maks 2</span></div><div class="pv-drop">${vals.map(k=>pivotChip(k,'values')).join('')||'<span class="pv-hint">Centang Sales, Trx, Qty, atau Basket Size</span>'}</div></div>
+        <div class="pv-status" id="pivotStatus"></div>
       </div>
-
-      <div class="pivot-zone">
-        <div class="pivot-zone-title">VALUE FIELDS <span>max 2</span></div>
-        <div class="pivot-builder-row">
-          <label>Value 1</label>
-          <select class="control pivot-builder-select" data-pivot-key="value1">${pivotOptionList(PIVOT_VALUES,value1)}</select>
-        </div>
-        <div class="pivot-builder-row">
-          <label>Value 2</label>
-          <select class="control pivot-builder-select" data-pivot-key="value2">${pivotOptionList(PIVOT_VALUES,value2,true)}</select>
+      <div class="pv-adv ${adv?'open':''}">
+        <button type="button" class="pv-adv-toggle">${adv?'▾':'▸'} Opsi lanjutan</button>
+        <div class="pv-adv-body">
+          <div class="pivot-builder-row"><label>Show Row</label><select class="control pivot-builder-select" data-pivot-key="showRows">${[10,25,50,100].map(v=>`<option value="${v}" ${Number(p.showRows)===v?'selected':''}>${v}</option>`).join('')}</select></div>
+          <div class="pivot-builder-row"><label>Sort By</label><select class="control pivot-builder-select" data-pivot-key="sortBy">${PIVOT_SORT_OPTIONS.map(([v,l])=>`<option value="${v}" ${p.sortBy===v?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="pivot-options">
+            <label><input type="checkbox" data-pivot-opt="showGrowth" ${p.showGrowth?'checked':''}> Growth %</label>
+            <label><input type="checkbox" data-pivot-opt="showShare" ${p.showShare?'checked':''}> % Share</label>
+            <label title="Butuh 2 field di Rows"><input type="checkbox" data-pivot-opt="subtotals" ${p.subtotals?'checked':''} ${rows.length===2?'':'disabled'}> Subtotal</label>
+            <label><input type="checkbox" data-pivot-opt="showOthers" ${p.showOthers?'checked':''}> Baris Others</label>
+          </div>
+          <div class="pivot-preset-row">
+            <select class="control" id="pivotPresetSel"><option value="">— Preset —</option>${pivotPresets().map((x,i)=>`<option value="${i}">${esc(x.name)}</option>`).join('')}</select>
+            <button type="button" class="btn" id="pivotPresetSave">Simpan</button>
+            <button type="button" class="btn" id="pivotPresetDel">Hapus</button>
+          </div>
+          <button type="button" class="btn pv-reset">Reset field</button>
         </div>
       </div>
-
-      <div class="pivot-zone pivot-run-zone">
-        <div class="pivot-zone-title">RESULT</div>
-        <div class="pivot-builder-row">
-          <label>Show Row</label>
-          <select class="control pivot-builder-select" data-pivot-key="showRows">
-            ${[10,25,50,100].map(v=>`<option value="${v}" ${Number(p.showRows)===v?'selected':''}>${v}</option>`).join('')}
-          </select>
-        </div>
-        <div class="pivot-builder-row">
-          <label>Sort By</label>
-          <select class="control pivot-builder-select" data-pivot-key="sortBy">${PIVOT_SORT_OPTIONS.map(([v,l])=>`<option value="${v}" ${p.sortBy===v?'selected':''}>${l}</option>`).join('')}</select>
-        </div>
-        <div class="pivot-options">
-          <label><input type="checkbox" data-pivot-opt="showGrowth" ${p.showGrowth?'checked':''}> Growth %</label>
-          <label><input type="checkbox" data-pivot-opt="showShare" ${p.showShare?'checked':''}> % Share</label>
-          <label title="Butuh 2 Row Field"><input type="checkbox" data-pivot-opt="subtotals" ${p.subtotals?'checked':''} ${row2?'':'disabled'}> Subtotal Row 1</label>
-          <label><input type="checkbox" data-pivot-opt="showOthers" ${p.showOthers?'checked':''}> Baris Others</label>
-        </div>
-        <div class="pivot-preset-row">
-          <select class="control" id="pivotPresetSel"><option value="">— Preset tersimpan —</option>${pivotPresets().map((x,i)=>`<option value="${i}">${esc(x.name)}</option>`).join('')}</select>
-          <button type="button" class="btn" id="pivotPresetSave" title="Simpan konfigurasi">Simpan</button>
-          <button type="button" class="btn" id="pivotPresetDel" title="Hapus preset terpilih">Hapus</button>
-        </div>
-        <button class="apply pivot-generate" type="button">GENERATE PIVOT</button>
-      </div>
-    </div>
-    <div class="pivot-builder-help">
-      Data dihitung di server dan browser hanya menerima hasil agregasi. Row Field yang sangat detail seperti SKU/Item dapat membutuhkan filter tambahan.
     </div>`;
 }
-
+let pivotAutoTimer=null,pivotDragField=null;
+function pivotChanged(msg){
+  renderPivotBuilder();bindPivotBuilder();
+  const st=$('#pivotStatus');
+  if(msg){if(st)st.innerHTML=`<span class="pv-warn">${esc(msg)}</span>`;return}
+  schedulePivotRun();
+}
+function schedulePivotRun(delay=600){
+  clearTimeout(pivotAutoTimer);
+  const st=$('#pivotStatus'),rows=pivotRows(),vals=pivotVals();
+  if(!rows.length||!vals.length){if(st)st.innerHTML='<span class="pv-hint">Pilih minimal 1 field di Rows dan 1 di Values — tabel akan muncul otomatis.</span>';return}
+  if(rows.includes('date')){const long=periodsFor('pivot').map((x,i)=>[i,pivotPeriodDays(x)]).filter(x=>x[1]>31);if(long.length){if(st)st.innerHTML=`<span class="pv-warn">Date di Rows hanya untuk periode maks 31 hari (${long.map(([i,d])=>(i===0?'Current':'Previous '+i)+' '+d+' hari').join(', ')}). Ubah periode di atas.</span>`;return}}
+  if(st)st.innerHTML='<span class="pv-hint">Memperbarui tabel…</span>';
+  pivotAutoTimer=setTimeout(async()=>{S.pivot.loaded=true;try{await loadSection('pivot')}finally{const s2=$('#pivotStatus');if(s2)s2.innerHTML=''}},delay);
+}
 function bindPivotBuilder(){
-  $$('.pivot-builder-select').forEach(sel=>sel.onchange=()=>{
-    const key=sel.dataset.pivotKey;
-    const usedBefore=pivotUsesItem();
-    if(key==='row1')S.pivot.rowFields[0]=sel.value;
-    if(key==='row2')S.pivot.rowFields[1]=sel.value;
-    if((key==='row1'||key==='row2')&&usedBefore!==pivotUsesItem()){renderPivotBuilder();bindPivotBuilder();return}
-    if(key==='column')S.pivot.columnField=sel.value;
-    if(key==='value1')S.pivot.valueFields[0]=sel.value;
-    if(key==='value2')S.pivot.valueFields[1]=sel.value;
-    if(key==='showRows')S.pivot.showRows=Number(sel.value)||25;
-    if(key==='sortBy')S.pivot.sortBy=sel.value;
-    if(key==='row2'&&!sel.value){S.pivot.subtotals=false;const sb=$('[data-pivot-opt="subtotals"]');if(sb){sb.checked=false;sb.disabled=true}}
-    if(key==='row2'&&sel.value){const sb=$('[data-pivot-opt="subtotals"]');if(sb)sb.disabled=false}
+  const root=$('#pivotBuilder');if(!root)return;
+  $$('[data-pv-field]',root).forEach(cb=>cb.onchange=()=>pivotChanged(pivotToggleField(cb.dataset.pvField,cb.checked)));
+  $$('.pv-chip-x',root).forEach(b=>b.onclick=e=>{e.stopPropagation();pivotRemove(b.dataset.field);pivotChanged('')});
+  const swap=$('.pv-swap',root);if(swap)swap.onclick=()=>{setPivotRows(pivotRows().reverse());pivotChanged('')};
+  // drag & drop (desktop); click/checkbox works everywhere
+  $$('[draggable="true"]',root).forEach(el=>{el.ondragstart=e=>{pivotDragField=el.dataset.field;e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',pivotDragField)}catch(_){}}});
+  $$('.pv-area',root).forEach(area=>{
+    area.ondragover=e=>{e.preventDefault();area.classList.add('drag')};
+    area.ondragleave=()=>area.classList.remove('drag');
+    area.ondrop=e=>{e.preventDefault();area.classList.remove('drag');const k=pivotDragField;pivotDragField=null;if(!k)return;pivotChanged(pivotPlace(k,area.dataset.drop))};
   });
-
+  const fl=$('.pv-fields',root);
+  if(fl){fl.ondragover=e=>e.preventDefault();fl.ondrop=e=>{e.preventDefault();const k=pivotDragField;pivotDragField=null;if(k&&k!=='period'){pivotRemove(k);pivotChanged('')}}}
+  $('.pv-adv-toggle',root).onclick=()=>{S.pivot.advancedOpen=!S.pivot.advancedOpen;renderPivotBuilder();bindPivotBuilder()};
+  $('.pv-reset',root).onclick=()=>{setPivotRows(['store']);setPivotVals(['sales']);S.pivot.columnField='period';S.pivot.items=[];S.pivot.subtotals=false;pivotChanged('')};
+  $$('.pivot-builder-select',root).forEach(sel=>sel.onchange=()=>{
+    if(sel.dataset.pivotKey==='showRows')S.pivot.showRows=Number(sel.value)||25;
+    if(sel.dataset.pivotKey==='sortBy')S.pivot.sortBy=sel.value;
+    schedulePivotRun(300);
+  });
+  $$('[data-pivot-opt]',root).forEach(cb=>cb.onchange=()=>{S.pivot[cb.dataset.pivotOpt]=cb.checked;schedulePivotRun(300)});
   bindPivotItemPicker();
-  $$('[data-pivot-opt]').forEach(cb=>cb.onchange=()=>{S.pivot[cb.dataset.pivotOpt]=cb.checked});
   const psel=$('#pivotPresetSel');
   if(psel)psel.onchange=()=>{
     const x=pivotPresets()[Number(psel.value)];if(!x)return;
     PIVOT_PRESET_FIELDS.forEach(k=>{if(x.config[k]!==undefined)S.pivot[k]=clone(x.config[k])});
-    renderFilters();const again=$('#pivotPresetSel');if(again)again.value=psel.value;
+    S.pivot.advancedOpen=true;renderFilters();const again=$('#pivotPresetSel');if(again)again.value=psel.value;schedulePivotRun(100);
   };
   const psave=$('#pivotPresetSave');
   if(psave)psave.onclick=()=>{
@@ -431,22 +457,8 @@ function bindPivotBuilder(){
   };
   const pdel=$('#pivotPresetDel');
   if(pdel)pdel.onclick=()=>{
-    const i=Number($('#pivotPresetSel').value);const list=pivotPresets();if(!$('#pivotPresetSel').value||!list[i])return alert('Pilih preset yang akan dihapus.');
+    const sel=$('#pivotPresetSel'),i=Number(sel.value),list=pivotPresets();if(!sel.value||!list[i])return alert('Pilih preset yang akan dihapus.');
     if(!confirm(`Hapus preset "${list[i].name}"?`))return;list.splice(i,1);savePivotPresets(list);renderPivotBuilder();bindPivotBuilder();
-  };
-  const generate=$('.pivot-generate');
-  if(generate)generate.onclick=async()=>{
-    const rowFields=S.pivot.rowFields.filter(Boolean);
-    const valueFields=S.pivot.valueFields.filter(Boolean);
-
-    if(!rowFields.length)return alert('Pilih minimal 1 Row Field.');
-    if(new Set(rowFields).size!==rowFields.length)return alert('Row 1 dan Row 2 tidak boleh sama.');
-    if(!valueFields.length)return alert('Pilih minimal 1 Value Field.');
-    if(new Set(valueFields).size!==valueFields.length)return alert('Value 1 dan Value 2 tidak boleh sama.');
-    if(rowFields.includes('date')){const long=periodsFor('pivot').map((x,i)=>[i,pivotPeriodDays(x)]).filter(x=>x[1]>31);if(long.length)return alert('Row Field Date hanya untuk periode maksimal 31 hari.\n'+long.map(([i,d])=>(i===0?'Current':'Previous '+i)+': '+d+' hari').join('\n'))}
-
-    S.pivot.loaded=true;
-    await loadSection('pivot');
   };
 }
 
@@ -1992,7 +2004,7 @@ function setupSectionVisibility(){
       // refresh that section once with the user's current filters.
       if(!nowHidden){
         const stateKey=SECTION_STATE_MAP[id];
-        if(stateKey==='pivot' && !S.pivot.loaded)return;
+        if(stateKey==='pivot' && !S.pivot.loaded){schedulePivotRun(100);return;}
         if(stateKey)await loadSection(stateKey);
       }
     };
