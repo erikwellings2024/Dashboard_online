@@ -1829,3 +1829,38 @@ body.dash-fit .export-section:not(#itemSalesSection) .compact-table,
 body.dash-fit .export-section:not(#itemSalesSection) .month-table{width:auto !important;min-width:0 !important}
 body.dash-fit .export-section .rank-grid{display:flex !important;flex-wrap:wrap;align-items:flex-start;gap:12px}
 body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100%;overflow-x:auto}
+
+/* V60 Pivot item sub-field */
+.pivot-subfield{margin-top:8px;border:1px dashed #9bb7cf;background:#f6fafd;padding:8px}
+.pivot-subfield-head{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-bottom:6px}
+.pivot-subfield-head span{color:#667085;font-size:10px}
+.pivot-item-search{position:relative}
+.pivot-item-search .control{width:100%;box-sizing:border-box}
+.pivot-item-results{display:none;position:absolute;left:0;right:0;top:calc(100% + 2px);background:#fff;border:1px solid #a8b1ba;box-shadow:0 12px 28px rgba(16,24,40,.15);max-height:280px;overflow:auto;z-index:220}
+.pivot-item-results.open{display:block}
+.pivot-item-option{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-bottom:1px solid #eef1f4;cursor:pointer;font-size:12px}
+.pivot-item-option:hover{background:#f2f7fb}
+.pivot-item-option span{display:flex;flex-direction:column}
+.pivot-item-option small{color:#667085;font-size:10.5px}
+.pivot-item-bulk{padding:6px 8px;border-bottom:1px solid #e3e7eb;background:#f8fafc}
+.pivot-item-bulk button,.pivot-item-clear{border:1px solid #9aa4ae;background:#fff;padding:3px 8px;font-size:11px;cursor:pointer}
+.pivot-item-none{padding:8px;color:#888;font-size:12px}
+.pivot-item-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;max-height:120px;overflow:auto}
+.pivot-item-chip{display:inline-flex;align-items:center;gap:5px;background:#e3eef8;border:1px solid #b6cde3;padding:2px 4px 2px 7px;font-size:11px;max-width:100%}
+.pivot-item-chip small{color:#5b6b7b;font-size:10px}
+.pivot-item-chip button{border:0;background:transparent;cursor:pointer;font-size:14px;line-height:1;color:#7a1f1f;padding:0 3px}
+.pivot-item-empty{font-size:10.5px;color:#8a5a00}
+
+/* V60.1 Pivot result options */
+.pivot-options{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px;margin:6px 0}
+.pivot-options label{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.pivot-preset-row{display:grid;grid-template-columns:1fr auto auto;gap:5px;margin-bottom:6px}
+.pivot-preset-row .btn{padding:4px 8px;font-size:11px}
+.pivot-result-table th.pivot-growth-group{background:#dfe9f5}
+.pivot-result-table th.pivot-share-group{background:#efe6f6}
+.pivot-result-table td.pivot-growth.pos{color:#1d7a35;font-weight:700}
+.pivot-result-table td.pivot-growth.neg{color:#c62828;font-weight:700}
+.pivot-result-table tr.pivot-subtotal td{background:#eef4ea;font-weight:700}
+.pivot-sub-toggle{border:1px solid #8aa48a;background:#fff;width:20px;height:20px;line-height:16px;padding:0;margin-right:6px;cursor:pointer;font-weight:700}
+.pivot-sub-count{font-weight:400;color:#667085;font-size:10.5px;margin-left:8px}
+.pivot-result-table tr.pivot-others td{background:#f6f6f6;font-style:italic}

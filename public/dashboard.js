@@ -92,7 +92,7 @@ S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.r
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
-S.pivot={periods:clone(p),prevCount:2,product:'',productLabel:'',rowFields:['channel',''],columnField:'period',valueFields:['sales','trx'],showRows:25,loaded:false,filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.pivot={periods:clone(p),prevCount:2,product:'',productLabel:'',items:[],sortBy:'current_desc',showGrowth:true,showShare:false,subtotals:false,showOthers:true,rowFields:['channel',''],columnField:'period',valueFields:['sales','trx'],showRows:25,loaded:false,filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
 function rangeControl(section,key,label,period){
@@ -238,6 +238,92 @@ function pivotOptionList(options,value,allowBlank=false){
   return items.map(([v,label])=>`<option value="${esc(v)}" ${String(v)===String(value)?'selected':''}>${esc(label)}</option>`).join('');
 }
 
+// V60.1 Pivot result options + presets (saved per browser).
+const PIVOT_SORT_OPTIONS=[['current_desc','Current ↓ (terbesar)'],['current_asc','Current ↑ (terkecil)'],['p1_desc','Previous 1 ↓'],['p2_desc','Previous 2 ↓'],['growth_p1_desc','Growth vs P1 ↓ (naik terbesar)'],['growth_p1_asc','Growth vs P1 ↑ (turun terdalam)'],['growth_p2_desc','Growth vs P2 ↓'],['growth_p2_asc','Growth vs P2 ↑'],['label_asc','Abjad A–Z']];
+const PIVOT_PRESET_KEY='dashboard.pivotPresets.v1';
+function pivotPresets(){try{return JSON.parse(localStorage.getItem(PIVOT_PRESET_KEY)||'[]')}catch(e){return []}}
+function savePivotPresets(list){try{localStorage.setItem(PIVOT_PRESET_KEY,JSON.stringify(list.slice(0,30)));return true}catch(e){alert('Preset tidak bisa disimpan di browser ini.');return false}}
+const PIVOT_PRESET_FIELDS=['rowFields','columnField','valueFields','showRows','sortBy','showGrowth','showShare','subtotals','showOthers','items','prevCount','filters','product','productLabel'];
+function pivotPeriodDays(p){return Math.round((parseISO(p.end)-parseISO(p.start))/86400000)+1}
+
+// V60 Pivot sub-field: pick specific items (multiple) when SKU / Item Name is a Row Field.
+const PIVOT_ITEM_FIELDS=['sku','itemName'];
+const PIVOT_ITEM_MAX=300;
+function pivotUsesItem(){return S.pivot.rowFields.some(f=>PIVOT_ITEM_FIELDS.includes(f))}
+function pivotItemKey(it){return (it.sku||'')+'|'+(it.itemName||'')}
+function pivotItemPickerHtml(){
+  return `<div class="pivot-subfield" id="pivotItemPicker">
+    <div class="pivot-subfield-head"><b>Pilih Item</b><span>sub-field SKU / Item Name • multiple • maks ${PIVOT_ITEM_MAX}</span></div>
+    <div class="pivot-item-search">
+      <input class="control" id="pivotItemQ" autocomplete="off" placeholder="Cari SKU / nama item (min 2 huruf) atau paste beberapa SKU">
+      <div class="pivot-item-results" id="pivotItemResults"></div>
+    </div>
+    <div class="pivot-item-chips" id="pivotItemChips"></div>
+  </div>`;
+}
+function renderPivotItemChips(){
+  const box=$('#pivotItemChips');if(!box)return;
+  const items=S.pivot.items||[];
+  box.innerHTML=items.length
+    ?`${items.map((it,i)=>`<span class="pivot-item-chip" title="${esc(it.sku||'')} ${esc(it.itemName||'')}">${esc(it.itemName||it.sku)}${it.sku&&it.itemName?`<small>${esc(it.sku)}</small>`:''}<button type="button" data-i="${i}" aria-label="Hapus">×</button></span>`).join('')}<button type="button" class="pivot-item-clear">Hapus semua (${items.length})</button>`
+    :`<span class="pivot-item-empty">Belum ada item dipilih — semua item dihitung (bisa melebihi batas 5.000 row group).</span>`;
+  $$('button[data-i]',box).forEach(b=>b.onclick=()=>{S.pivot.items.splice(Number(b.dataset.i),1);renderPivotItemChips();refreshPivotItemResults()});
+  const clr=$('.pivot-item-clear',box);if(clr)clr.onclick=()=>{S.pivot.items=[];renderPivotItemChips();refreshPivotItemResults()};
+}
+function togglePivotItem(it,on){
+  const list=S.pivot.items||(S.pivot.items=[]);const k=pivotItemKey(it),i=list.findIndex(x=>pivotItemKey(x)===k);
+  if(on&&i<0){if(list.length>=PIVOT_ITEM_MAX)return alert(`Maksimal ${PIVOT_ITEM_MAX} item.`);list.push({sku:it.sku||'',itemName:it.itemName||''})}
+  if(!on&&i>=0)list.splice(i,1);
+  renderPivotItemChips();
+}
+let pivotItemLast=[];
+function refreshPivotItemResults(){
+  const box=$('#pivotItemResults');if(!box||!box.classList.contains('open'))return;
+  const sel=new Set((S.pivot.items||[]).map(pivotItemKey));
+  $$('input[data-k]',box).forEach(cb=>cb.checked=sel.has(cb.dataset.k));
+}
+function showPivotItemResults(list,extraHtml=''){
+  const box=$('#pivotItemResults');if(!box)return;
+  pivotItemLast=list;const sel=new Set((S.pivot.items||[]).map(pivotItemKey));
+  box.innerHTML=extraHtml+(list.length?list.map((p,i)=>{const it={sku:p.newItemCode||p.sku||'',itemName:p.itemName||''},k=pivotItemKey(it);return `<label class="pivot-item-option"><input type="checkbox" data-i="${i}" data-k="${esc(k)}" ${sel.has(k)?'checked':''}><span><b>${esc(it.itemName||'-')}</b><small>${esc(it.sku)}${p.brand?` • ${esc(p.brand)}`:''}</small></span></label>`}).join(''):(extraHtml?'':'<div class="pivot-item-none">Item tidak ditemukan</div>'));
+  const brands=[...new Set(list.map(p=>String(p.brand||'').trim()).filter(Boolean))].slice(0,3);
+  if(list.length>1||brands.length)box.insertAdjacentHTML('afterbegin',`<div class="pivot-item-bulk">${list.length>1?`<button type="button" class="pivot-item-all">Pilih semua hasil (${list.length})</button>`:''}${brands.map(b=>`<button type="button" class="pivot-item-brand" data-brand="${esc(b)}">+ Semua item brand ${esc(b)}</button>`).join('')}</div>`);
+  $$('.pivot-item-brand',box).forEach(btn=>btn.onclick=async()=>{
+    btn.disabled=true;btn.textContent='Memuat...';
+    try{const rows=await api('/api/meta/products?brand='+encodeURIComponent(btn.dataset.brand));let added=0;for(const p of rows){const before=(S.pivot.items||[]).length;togglePivotItem({sku:p.newItemCode||p.sku||'',itemName:p.itemName||''},true);if((S.pivot.items||[]).length>before)added++}btn.textContent=`✓ ${added} item ditambahkan`;refreshPivotItemResults()}
+    catch(e){btn.textContent='Gagal memuat';btn.disabled=false}
+  });
+  box.classList.add('open');
+  $$('input[data-i]',box).forEach(cb=>cb.onchange=()=>{const p=pivotItemLast[Number(cb.dataset.i)];togglePivotItem({sku:p.newItemCode||p.sku||'',itemName:p.itemName||''},cb.checked)});
+  const all=$('.pivot-item-all',box);if(all)all.onclick=()=>{pivotItemLast.forEach(p=>togglePivotItem({sku:p.newItemCode||p.sku||'',itemName:p.itemName||''},true));refreshPivotItemResults()};
+  const paste=$('.pivot-item-paste',box);if(paste)paste.onclick=async()=>{
+    const skus=JSON.parse(paste.dataset.skus);let names=new Map();
+    try{const rows=await api('/api/meta/products?skus='+encodeURIComponent(skus.join(',')));rows.forEach(p=>names.set(String(p.newItemCode||p.sku||'').trim(),p.itemName||''))}catch(e){}
+    skus.forEach(sku=>togglePivotItem({sku,itemName:names.get(sku)||''},true));
+    const miss=skus.filter(x=>!names.has(x));
+    $('#pivotItemQ').value='';box.classList.remove('open');
+    if(miss.length)alert(`${miss.length} SKU tidak ditemukan di data dan tetap ditambahkan apa adanya:\n${miss.slice(0,10).join(', ')}${miss.length>10?' ...':''}`);
+  };
+}
+function bindPivotItemPicker(){
+  const q=$('#pivotItemQ');if(!q)return;
+  renderPivotItemChips();
+  let timer=null,seq=0;
+  q.onclick=e=>e.stopPropagation();
+  $('#pivotItemResults').onclick=e=>e.stopPropagation();
+  q.oninput=()=>{
+    clearTimeout(timer);const v=q.value.trim(),box=$('#pivotItemResults');
+    const tokens=v.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
+    if(tokens.length>1&&tokens.every(t=>/^\d{6,}$/.test(t))){
+      const skus=[...new Set(tokens)];
+      showPivotItemResults([],`<div class="pivot-item-bulk"><button type="button" class="pivot-item-paste" data-skus='${esc(JSON.stringify(skus))}'>Tambahkan ${skus.length} SKU yang di-paste</button></div>`);return;
+    }
+    if(v.length<2){box.classList.remove('open');box.innerHTML='';return}
+    timer=setTimeout(async()=>{const my=++seq;try{const rows=await api('/api/meta/products?q='+encodeURIComponent(v));if(my===seq)showPivotItemResults(rows||[])}catch(e){}},250);
+  };
+  document.addEventListener('click',()=>{const b=$('#pivotItemResults');if(b)b.classList.remove('open')});
+}
+
 function renderPivotBuilder(){
   const p=S.pivot;
   const row1=p.rowFields[0]||'channel';
@@ -257,6 +343,7 @@ function renderPivotBuilder(){
           <label>Row 2</label>
           <select class="control pivot-builder-select" data-pivot-key="row2">${pivotOptionList(PIVOT_DIMENSIONS,row2,true)}</select>
         </div>
+        ${pivotUsesItem()?pivotItemPickerHtml():''}
       </div>
 
       <div class="pivot-zone">
@@ -288,6 +375,21 @@ function renderPivotBuilder(){
             ${[10,25,50,100].map(v=>`<option value="${v}" ${Number(p.showRows)===v?'selected':''}>${v}</option>`).join('')}
           </select>
         </div>
+        <div class="pivot-builder-row">
+          <label>Sort By</label>
+          <select class="control pivot-builder-select" data-pivot-key="sortBy">${PIVOT_SORT_OPTIONS.map(([v,l])=>`<option value="${v}" ${p.sortBy===v?'selected':''}>${l}</option>`).join('')}</select>
+        </div>
+        <div class="pivot-options">
+          <label><input type="checkbox" data-pivot-opt="showGrowth" ${p.showGrowth?'checked':''}> Growth %</label>
+          <label><input type="checkbox" data-pivot-opt="showShare" ${p.showShare?'checked':''}> % Share</label>
+          <label title="Butuh 2 Row Field"><input type="checkbox" data-pivot-opt="subtotals" ${p.subtotals?'checked':''} ${row2?'':'disabled'}> Subtotal Row 1</label>
+          <label><input type="checkbox" data-pivot-opt="showOthers" ${p.showOthers?'checked':''}> Baris Others</label>
+        </div>
+        <div class="pivot-preset-row">
+          <select class="control" id="pivotPresetSel"><option value="">— Preset tersimpan —</option>${pivotPresets().map((x,i)=>`<option value="${i}">${esc(x.name)}</option>`).join('')}</select>
+          <button type="button" class="btn" id="pivotPresetSave" title="Simpan konfigurasi">Simpan</button>
+          <button type="button" class="btn" id="pivotPresetDel" title="Hapus preset terpilih">Hapus</button>
+        </div>
         <button class="apply pivot-generate" type="button">GENERATE PIVOT</button>
       </div>
     </div>
@@ -299,14 +401,39 @@ function renderPivotBuilder(){
 function bindPivotBuilder(){
   $$('.pivot-builder-select').forEach(sel=>sel.onchange=()=>{
     const key=sel.dataset.pivotKey;
+    const usedBefore=pivotUsesItem();
     if(key==='row1')S.pivot.rowFields[0]=sel.value;
     if(key==='row2')S.pivot.rowFields[1]=sel.value;
+    if((key==='row1'||key==='row2')&&usedBefore!==pivotUsesItem()){renderPivotBuilder();bindPivotBuilder();return}
     if(key==='column')S.pivot.columnField=sel.value;
     if(key==='value1')S.pivot.valueFields[0]=sel.value;
     if(key==='value2')S.pivot.valueFields[1]=sel.value;
     if(key==='showRows')S.pivot.showRows=Number(sel.value)||25;
+    if(key==='sortBy')S.pivot.sortBy=sel.value;
+    if(key==='row2'&&!sel.value){S.pivot.subtotals=false;const sb=$('[data-pivot-opt="subtotals"]');if(sb){sb.checked=false;sb.disabled=true}}
+    if(key==='row2'&&sel.value){const sb=$('[data-pivot-opt="subtotals"]');if(sb)sb.disabled=false}
   });
 
+  bindPivotItemPicker();
+  $$('[data-pivot-opt]').forEach(cb=>cb.onchange=()=>{S.pivot[cb.dataset.pivotOpt]=cb.checked});
+  const psel=$('#pivotPresetSel');
+  if(psel)psel.onchange=()=>{
+    const x=pivotPresets()[Number(psel.value)];if(!x)return;
+    PIVOT_PRESET_FIELDS.forEach(k=>{if(x.config[k]!==undefined)S.pivot[k]=clone(x.config[k])});
+    renderFilters();const again=$('#pivotPresetSel');if(again)again.value=psel.value;
+  };
+  const psave=$('#pivotPresetSave');
+  if(psave)psave.onclick=()=>{
+    const name=(prompt('Nama preset pivot:','')||'').trim();if(!name)return;
+    const list=pivotPresets().filter(x=>x.name!==name);const cfg={};PIVOT_PRESET_FIELDS.forEach(k=>cfg[k]=clone(S.pivot[k]));
+    list.unshift({name,config:cfg,savedAt:new Date().toISOString()});
+    if(savePivotPresets(list)){renderPivotBuilder();bindPivotBuilder();const again=$('#pivotPresetSel');if(again)again.value='0'}
+  };
+  const pdel=$('#pivotPresetDel');
+  if(pdel)pdel.onclick=()=>{
+    const i=Number($('#pivotPresetSel').value);const list=pivotPresets();if(!$('#pivotPresetSel').value||!list[i])return alert('Pilih preset yang akan dihapus.');
+    if(!confirm(`Hapus preset "${list[i].name}"?`))return;list.splice(i,1);savePivotPresets(list);renderPivotBuilder();bindPivotBuilder();
+  };
   const generate=$('.pivot-generate');
   if(generate)generate.onclick=async()=>{
     const rowFields=S.pivot.rowFields.filter(Boolean);
@@ -316,6 +443,7 @@ function bindPivotBuilder(){
     if(new Set(rowFields).size!==rowFields.length)return alert('Row 1 dan Row 2 tidak boleh sama.');
     if(!valueFields.length)return alert('Pilih minimal 1 Value Field.');
     if(new Set(valueFields).size!==valueFields.length)return alert('Value 1 dan Value 2 tidak boleh sama.');
+    if(rowFields.includes('date')){const long=periodsFor('pivot').map((x,i)=>[i,pivotPeriodDays(x)]).filter(x=>x[1]>31);if(long.length)return alert('Row Field Date hanya untuk periode maksimal 31 hari.\n'+long.map(([i,d])=>(i===0?'Current':'Previous '+i)+': '+d+' hari').join('\n'))}
 
     S.pivot.loaded=true;
     await loadSection('pivot');
@@ -705,7 +833,7 @@ if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
 if(sec==='daily'){showLoad('#dailyTable');const filters=reqFilters('daily');filters.product=S.daily.product;const d=await api('/api/query/daily-trend',{method:'POST',body:JSON.stringify({period:S.daily.period,filters,metricMode:S.daily.metricMode})});renderDailyTrend(d)}
 if(sec==='itemSales'){showLoad('#itemSalesTable');const filters=reqFilters('itemSales');filters.product=S.itemSales.product;const d=await api('/api/query/item-sales',{method:'POST',body:JSON.stringify({periods:periodsFor('itemSales'),filters,topN:S.itemSales.topN,metricMode:S.itemSales.metricMode})});renderItemSales(d)}
-if(sec==='pivot'){showLoad('#pivotTable');const filters=reqFilters('pivot');filters.product=S.pivot.product;const d=await api('/api/query/pivot-analysis',{method:'POST',body:JSON.stringify({periods:periodsFor('pivot'),filters,rowFields:S.pivot.rowFields.filter(Boolean),columnField:S.pivot.columnField,valueFields:S.pivot.valueFields.filter(Boolean),showRows:S.pivot.showRows})});renderPivot(d)}
+if(sec==='pivot'){showLoad('#pivotTable');const filters=reqFilters('pivot');filters.product=S.pivot.product;const d=await api('/api/query/pivot-analysis',{method:'POST',body:JSON.stringify({periods:periodsFor('pivot'),filters,rowFields:S.pivot.rowFields.filter(Boolean),columnField:S.pivot.columnField,valueFields:S.pivot.valueFields.filter(Boolean),showRows:S.pivot.showRows,items:pivotUsesItem()?(S.pivot.items||[]):[],sortBy:S.pivot.sortBy,subtotals:!!S.pivot.subtotals&&S.pivot.rowFields.filter(Boolean).length===2,showOthers:!!S.pivot.showOthers})});renderPivot(d)}
 }catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable',pivot:'#pivotTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
@@ -1124,7 +1252,15 @@ function renderPivot(d){
     });
     head+='</tr><tr>';
     (d.columnGroups||[]).forEach(()=>valueLabels.forEach(label=>head+=`<th>${esc(label)}</th>`));
-    head+='</tr></thead>';
+    // V60.1 Growth % and % Share columns (Column Field = Period only).
+    const growthGroups=[];
+    if(S.pivot.showGrowth)for(let pi=1;pi<(d.columnGroups||[]).length;pi++)growthGroups.push(pi);
+    const shareMetrics=S.pivot.showShare?values.filter(m=>m!=='basket'):[];
+    let extraTop='',extraSub='';
+    growthGroups.forEach(pi=>{extraTop+=`<th colspan="${metricCount}" class="pivot-growth-group">Growth vs P${pi}</th>`;values.forEach((m,vi)=>{extraSub+=`<th>${esc(valueLabels[vi])}</th>`;leafKeys.push({type:'growth',base:pi,metric:m})})});
+    if(shareMetrics.length){extraTop+=`<th colspan="${shareMetrics.length}" class="pivot-share-group">% Share Current</th>`;shareMetrics.forEach(m=>{extraSub+=`<th>${esc(valueLabels[values.indexOf(m)])}</th>`;leafKeys.push({type:'share',metric:m})})}
+    if(extraTop)head=head.replace('</tr><tr>',extraTop+'</tr><tr>');
+    head+=extraSub+'</tr></thead>';
   }else{
     const grouped=[];
     for(const value of d.columnValues||[]){
@@ -1174,21 +1310,44 @@ function renderPivot(d){
     data-chart-series="${esc(chartSeries.join(','))}">
     ${head}<tbody>`;
 
-  for(const r of d.rows||[]){
-    h+='<tr>';
-    (r.labels||[]).forEach(label=>h+=`<td>${esc(label)}</td>`);
-    leafKeys.forEach(leaf=>{
-      h+=`<td class="num">${pivotMetricText(r.cells?.[leaf.cellKey],leaf.metric)}</td>`;
-    });
-    h+='</tr>';
+  const gVal=(cells,key,m)=>{const c=cells?.[key];if(!c)return 0;return m==='trx'?Number(c.trx||0):Number(c[m]||0)};
+  function leafCell(cells,leaf){
+    if(leaf.type==='growth'){
+      const cur=gVal(cells,'p0',leaf.metric),prev=gVal(cells,`p${leaf.base}`,leaf.metric);
+      if(!prev)return `<td class="num pivot-growth">${cur?'New':'-'}</td>`;
+      const g=(cur-prev)/Math.abs(prev);
+      const r1=Math.round(g*1000)/10;return `<td class="num pivot-growth ${r1<0?'neg':r1>0?'pos':''}">${r1>0?'+':''}${r1.toFixed(1)}%</td>`;
+    }
+    if(leaf.type==='share'){
+      const tot=gVal(d.grandTotal,'p0',leaf.metric),v=gVal(cells,'p0',leaf.metric);
+      return `<td class="num pivot-share">${tot?(v/tot*100).toFixed(1)+'%':'-'}</td>`;
+    }
+    return `<td class="num">${pivotMetricText(cells?.[leaf.cellKey],leaf.metric)}</td>`;
   }
+  const subMap=new Map((d.subtotals||[]).map(x=>[x.value,x]));
+  const rowsList=d.rows||[];
+  rowsList.forEach((r,i)=>{
+    const grp=subMap.size?r.labels[0]:null;
+    h+=`<tr${grp!==null?` data-pivot-group="${esc(grp)}"`:''}>`;
+    (r.labels||[]).forEach(label=>h+=`<td>${esc(label)}</td>`);
+    leafKeys.forEach(leaf=>{h+=leafCell(r.cells,leaf)});
+    h+='</tr>';
+    const next=rowsList[i+1];
+    if(grp!==null&&(!next||next.labels[0]!==grp)){
+      const st=subMap.get(grp);
+      h+=`<tr class="pivot-subtotal no-sort-row" data-pivot-subtotal="${esc(grp)}"><td colspan="${rowCount}"><button type="button" class="pivot-sub-toggle" data-group="${esc(grp)}">−</button> SUBTOTAL ${esc(grp)}<span class="pivot-sub-count">${st.rowCount} row group</span></td>`;
+      leafKeys.forEach(leaf=>h+=leafCell(st.cells,leaf).replace('<td class="num','<td class="num pivot-sub-cell'));
+      h+='</tr>';
+    }
+  });
 
   function totalRow(label,totals,cls='pivot-total'){
     let row=`<tr class="${cls} no-sort-row"><td colspan="${rowCount}">${esc(label)}</td>`;
-    leafKeys.forEach(leaf=>row+=`<td class="num">${pivotMetricText(totals?.[leaf.cellKey],leaf.metric)}</td>`);
+    leafKeys.forEach(leaf=>row+=leafCell(totals,leaf));
     return row+'</tr>';
   }
 
+  if(d.others)h+=totalRow(`OTHERS (${d.others.count} row group lainnya)`,d.others.cells,'pivot-others');
   if(d.rowTruncated){
     h+=totalRow(`TOTAL DISPLAYED (${d.shownRowGroups} ROW)`,d.displayedTotal,'rank-summary pivot-total-displayed');
   }
@@ -1201,16 +1360,28 @@ function renderPivot(d){
   notes.push(`Row: ${rowLabels.join(' > ')}`);
   notes.push(`Column: ${d.columnFieldLabel||d.columnField}`);
   notes.push(`Value: ${valueLabels.join(' + ')}`);
+  if(d.itemFilterCount)notes.push(`Item dipilih: ${d.itemFilterCount}`);
   notes.push(`Menampilkan ${d.shownRowGroups||0} dari ${d.totalRowGroups||0} row group`);
   if(d.columnField!=='period'){
     notes.push(`Column member ${d.columnValueCountShown||0} dari ${d.columnValueCountAll||0}`);
   }
-  if(d.rowTruncated)notes.push('Row dibatasi sesuai Show Row dan diurutkan berdasarkan Current Value 1');
+  const sortLabel=(PIVOT_SORT_OPTIONS.find(x=>x[0]===d.sortBy)||PIVOT_SORT_OPTIONS[0])[1];
+  notes.push(`Urutan: ${sortLabel} (Value 1)`);
+  if(d.rowTruncated)notes.push('Row dibatasi sesuai Show Row');
+  if(d.columnField!=='period'&&(S.pivot.showGrowth||S.pivot.showShare))notes.push('Growth % / % Share hanya tampil bila Column = Period');
   if(d.columnTruncated)notes.push('Column member otomatis dibatasi agar tabel tetap ringan; gunakan filter bila membutuhkan member lain');
 
   if(info)info.innerHTML=notes.map(x=>`<span>${esc(x)}</span>`).join('');
 
   const table=$('#pivotTable table');
+  if(subMap.size){
+    table.dataset.sortReady='1'; // keep subtotal grouping intact (no client re-sort)
+    $$('.pivot-sub-toggle',table).forEach(b=>b.onclick=()=>{
+      const g=b.dataset.group,hide=b.textContent==='−';
+      $$('tr[data-pivot-group]',table).forEach(tr=>{if(tr.dataset.pivotGroup===g)tr.style.display=hide?'none':''});
+      b.textContent=hide?'+':'−';
+    });
+  }
   enhanceTable(table);
 }
 
