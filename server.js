@@ -2721,13 +2721,72 @@ async function openMetabaseCsv(settings,sessionId,startDate,endDate){
 
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,500);
-    const e=new Error(`METABASE_CSV_FAILED (${r.status})${txt?': '+txt:''}`);
+    const e=new Error(`METABASE_CSV_FAILED (${r.status}): ${readableHttpError(r.status,txt)}`);
     e.statusCode=r.status;
     throw e;
   }
   if(!r.body)throw new Error('METABASE_CSV_FAILED: empty response');
 
   return r;
+}
+
+// V62: Metabase sits behind an nginx proxy that cuts requests after ~60 seconds.
+// Large date ranges are therefore fetched in smaller chunks (default 7 days),
+// retried on gateway errors, and split further if a chunk still times out.
+const METABASE_CHUNK_DAYS=Math.max(1,Math.min(31,Number(process.env.METABASE_CHUNK_DAYS)||7));
+function readableHttpError(status,txt){
+  const t=String(txt||'');
+  if(/<html/i.test(t)){const m=/<title>([^<]*)<\/title>/i.exec(t)||/<h1>([^<]*)<\/h1>/i.exec(t);return (m?m[1].trim():'HTML error page')+(status===504||status===502?' — server Metabase terlalu lama merespons':'')}
+  return t.replace(/\s+/g,' ').trim().slice(0,300);
+}
+function isGatewayError(e){const c=Number(e?.statusCode||0);return c===502||c===503||c===504||e?.name==='TimeoutError'||/ECONNRESET|ETIMEDOUT|UND_ERR|fetch failed|socket/i.test(String(e?.message||e?.cause?.code||''))}
+function isoAddDays(iso,n){const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function splitIsoRange(start,end,days){const out=[];let a=start;while(a<=end){const b=isoAddDays(a,days-1);out.push({start:a,end:b<end?b:end});a=isoAddDays(b,1)}return out}
+const sleepMs=ms=>new Promise(r=>setTimeout(r,ms));
+async function* metabaseChunkBodies(settings,startDate,endDate,info){
+  async function* openRange(a,b,depth){
+    let lastErr=null;
+    for(let attempt=1;attempt<=2;attempt++){
+      try{
+        info.current=`${a}..${b}`;
+        const t0=Date.now();
+        const {response,authMode}=await openMetabaseCsvWithSessionReuse(settings,a,b);
+        info.authMode=info.authMode||authMode;info.chunks.push({start:a,end:b,openMs:Date.now()-t0});
+        console.log(`[AUTO_SYNC] chunk ${a}..${b} opened in ${Date.now()-t0}ms (attempt ${attempt})`);
+        yield response.body;return;
+      }catch(e){
+        lastErr=e;if(!isGatewayError(e))throw e;
+        console.warn(`[AUTO_SYNC] chunk ${a}..${b} attempt ${attempt} failed: ${e.message}`);
+        if(attempt<2)await sleepMs(8000);
+      }
+    }
+    const days=Math.round((Date.parse(b)-Date.parse(a))/86400000)+1;
+    if(days>1&&depth<4){
+      const mid=isoAddDays(a,Math.floor(days/2)-1);
+      console.warn(`[AUTO_SYNC] splitting ${a}..${b} into ${a}..${mid} and ${isoAddDays(mid,1)}..${b}`);
+      yield* openRange(a,mid,depth+1);yield* openRange(isoAddDays(mid,1),b,depth+1);return;
+    }
+    const e=new Error(`Server Metabase timeout untuk tanggal ${a}..${b} setelah beberapa percobaan. Coba RUN NOW lagi beberapa menit kemudian. (${lastErr?.message||''})`);
+    e.statusCode=lastErr?.statusCode||504;throw e;
+  }
+  for(const c of splitIsoRange(startDate,endDate,METABASE_CHUNK_DAYS))yield* openRange(c.start,c.end,0);
+}
+async function* metabaseCsvCells(source){
+  if(typeof source!=='function'){yield* csvRowsFromReadable(Readable.fromWeb(source));return}
+  let headerKey=null;
+  for await(const body of source()){
+    let first=true;
+    for await(const cells of csvRowsFromReadable(Readable.fromWeb(body))){
+      if(first){
+        first=false;
+        const key=cells.map((x,i)=>{let v=String(x??'').trim();if(i===0)v=v.replace(/^\uFEFF/,'');return v}).join('\u001f');
+        if(headerKey===null){headerKey=key;yield cells}
+        else if(key!==headerKey)throw new Error('METABASE_CSV_HEADER_CHANGED antar potongan tanggal.');
+        continue;
+      }
+      yield cells;
+    }
+  }
 }
 
 async function openMetabaseCsvWithSessionReuse(settings,startDate,endDate){
@@ -2780,9 +2839,7 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
   try{
     await writeWithBackpressure(gzip,'[');
 
-    const readable=Readable.fromWeb(webBody);
-
-    for await(const cells of csvRowsFromReadable(readable)){
+    for await(const cells of metabaseCsvCells(webBody)){
       if(!header){
         header=cells.map((x,i)=>{
           let s=String(x??'').trim();
@@ -3045,19 +3102,16 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
   try{
     console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream-urlencoded`);
 
-    const {response,authMode}=await openMetabaseCsvWithSessionReuse(
-      settings,range.startDate,range.endDate
-    );
-
-    console.log(`[AUTO_SYNC] Metabase auth=${authMode}`);
-    console.log('[AUTO_SYNC] Metabase CSV stream opened; parsing row-by-row');
-
+    const chunkInfo={chunks:[],authMode:null,current:null};
+    console.log(`[AUTO_SYNC] chunked export: ${METABASE_CHUNK_DAYS} day(s) per request`);
     const streamed=await streamReplaceMonthFromMetabaseCsv(
-      response.body,range.targetMonth
+      ()=>metabaseChunkBodies(settings,range.startDate,range.endDate,chunkInfo),range.targetMonth
     );
+    const authMode=chunkInfo.authMode||'session';
+    console.log(`[AUTO_SYNC] Metabase auth=${authMode} chunks=${chunkInfo.chunks.length}`);
 
     const sourceFile=`Metabase Q${settings.questionId} ${range.startDate} to ${range.endDate}.csv`;
-    const contentLength=Number(response.headers.get('content-length')||0);
+    const contentLength=0;
     const finalized=await finalizeAutomatedMonthReplace(
       range.targetMonth,sourceFile,contentLength,streamed,trigger
     );
@@ -3992,4 +4046,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V60.2 Pivot streaming (60k groups) + item sub-field: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V60.2 Pivot streaming (60k groups) + item sub-field: enabled | V62 Metabase chunked sync: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
