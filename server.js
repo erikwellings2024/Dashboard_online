@@ -1924,6 +1924,9 @@ const PIVOT_MAX_ROW_GROUPS = 5000;
 const PIVOT_MAX_LEAF_COLUMNS = 60;
 const PIVOT_MAX_SHOW_ROWS = 100;
 const PIVOT_MAX_ITEM_FILTER = 300;
+// V60.2 streaming pivot keeps only aggregates per row group, so the cap can be much higher.
+const PIVOT_STREAM_MAX_GROUPS = 60000;
+const PIVOT_RSS_LIMIT_MB = 430;
 
 const PIVOT_FIELD_LABELS = {
   channel:'Channel',
@@ -2026,7 +2029,7 @@ function normalizePivotRequest(body){
 // V60.1: streaming pivot. Month files are read one at a time and aggregated
 // immediately, so raw rows of the 3 periods are never held in memory together.
 const PIVOT_SORTS=new Set(['current_desc','current_asc','p1_desc','p2_desc','growth_p1_desc','growth_p1_asc','growth_p2_desc','growth_p2_asc','label_asc']);
-function mergePivotAgg(t,a){if(!a)return;t.sales+=a.sales;t.qty+=a.qty;for(const i of a.invoices)t.invoices.add(i)}
+function mergePivotAgg(t,a){if(!a)return;t.sales+=a.sales;t.qty+=a.qty;if(t.invoices&&a.invoices)for(const i of a.invoices)t.invoices.add(i)}
 function pivotGrowth(cur,prev){return prev?((cur-prev)/Math.abs(prev)):null}
 function pivotDays(p){return Math.round((Date.parse(p.end+'T00:00:00Z')-Date.parse(p.start+'T00:00:00Z'))/86400000)+1}
 
@@ -2041,6 +2044,13 @@ async function pivotAnalysisStreaming(periods,filters,request){
     if(long.length)throw new Error(`Row Field Date hanya untuk periode maksimal 31 hari. ${long.map(x=>(x.i===0?'Current':'Previous '+x.i)+' = '+x.d+' hari').join(', ')}.`);
   }
   const P=periods.length,firstMetric=valueFields[0],isPeriodCol=columnField==='period';
+  // V60.2: invoice sets are only kept when Trx / Basket Size is requested (the
+  // heaviest part of a pivot). Sales / Qty pivots stay very light.
+  const needTrx=valueFields.some(v=>v==='trx'||v==='basket');
+  const na=()=>({sales:0,qty:0,invoices:needTrx?new Set():null});
+  const add=(a,r)=>{a.sales+=safeNum(r.sales);a.qty+=safeNum(r.qty);if(needTrx&&r.invoice)a.invoices.add(String(r.invoice))};
+  let seen=0;
+  const guard=()=>{if(++seen%25000)return;const mb=process.memoryUsage().rss/1048576;if(mb>PIVOT_RSS_LIMIT_MB){if(typeof global.gc==='function')global.gc();if(process.memoryUsage().rss/1048576>PIVOT_RSS_LIMIT_MB)throw new Error('Pivot terlalu besar untuk memori server. Kurangi kombinasi Row Field, pilih Value Sales/Qty saja, atau tambahkan filter.')}};
   const itemFilterCount=itemSkus.size+itemNames.size;
   const passItem=r=>{if(!itemFilterCount)return true;const sku=String(r.newItemCode||r.sku||'').trim();return (sku&&itemSkus.has(sku))||itemNames.has(String(r.itemName||'').trim().toUpperCase())};
   const monthKeys=[...new Set(periods.flatMap(p=>monthKeysInRange(p.start,p.end)))].filter(monthAllowed).sort();
@@ -2050,7 +2060,7 @@ async function pivotAnalysisStreaming(periods,filters,request){
       if(!Array.isArray(monthRows)||!monthRows.length)continue;
       for(const r of monthRows)decorateStoredRow(r);
       const rows=filterBase(monthRows,filters||{});monthRows=null;
-      for(const r of rows){if(passItem(r))fn(r)}
+      for(const r of rows){if(passItem(r)){fn(r);guard()}}
       if(typeof global.gc==='function'&&process.memoryUsage().rss/1048576>200)global.gc();
     }
   }
@@ -2061,7 +2071,7 @@ async function pivotAnalysisStreaming(periods,filters,request){
     const colRank=new Map();
     await eachRow(monthKeysInRange(periods[0].start,periods[0].end).filter(monthAllowed),r=>{
       if(!rowInPeriod(r,periods[0]))return;
-      const v=pivotDimensionValue(r,columnField);let g=colRank.get(v);if(!g){g=newPivotAgg();colRank.set(v,g)}addPivotAgg(g,r);
+      const v=pivotDimensionValue(r,columnField);let g=colRank.get(v);if(!g){g=na();colRank.set(v,g)}add(g,r);
     });
     const ranked=[...colRank.entries()].sort((x,y)=>{const d=pivotAggValue(y[1],firstMetric)-pivotAggValue(x[1],firstMetric);return d||String(x[0]).localeCompare(String(y[0]),undefined,{numeric:true,sensitivity:'base'})});
     columnValueCountAll=ranked.length;
@@ -2073,23 +2083,23 @@ async function pivotAnalysisStreaming(periods,filters,request){
 
   // Single main pass: every row group keeps per-period totals (+ per-column cells).
   const groups=new Map(),grand=new Map(),row1=new Map();
-  const getAgg=(m,k)=>{let g=m.get(k);if(!g){g=newPivotAgg();m.set(k,g)}return g};
+  const getAgg=(m,k)=>{let g=m.get(k);if(!g){g=na();m.set(k,g)}return g};
   await eachRow(monthKeys,r=>{
     let inAny=false;for(let pi=0;pi<P;pi++)if(rowInPeriod(r,periods[pi])){inAny=true;break}
     if(!inAny)return;
     const values=rowFields.map(f=>pivotDimensionValue(r,f)),key=pivotRowKey(values);
     let g=groups.get(key);
     if(!g){
-      if(groups.size>=PIVOT_MAX_ROW_GROUPS)throw new Error(`Pivot menghasilkan lebih dari ${PIVOT_MAX_ROW_GROUPS.toLocaleString('en-US')} row group. `+(rowFields.some(f=>f==='sku'||f==='itemName')?'Pilih item tertentu di sub-field "Pilih Item" atau tambahkan filter lain.':'Tambahkan filter atau gunakan Row Field yang lebih ringkas.'));
-      g={key,values,per:Array.from({length:P},newPivotAgg),cells:new Map()};groups.set(key,g);
+      if(groups.size>=PIVOT_STREAM_MAX_GROUPS)throw new Error(`Pivot menghasilkan lebih dari ${PIVOT_STREAM_MAX_GROUPS.toLocaleString('en-US')} row group. `+(rowFields.some(f=>f==='sku'||f==='itemName')?'Pilih item tertentu di sub-field "Pilih Item" atau tambahkan filter lain.':'Tambahkan filter atau gunakan Row Field yang lebih ringkas.'));
+      g={key,values,per:Array.from({length:P},na),cells:new Map()};groups.set(key,g);
     }
     const colV=isPeriodCol?null:pivotDimensionValue(r,columnField);
     for(let pi=0;pi<P;pi++){
       if(!rowInPeriod(r,periods[pi]))continue;
-      addPivotAgg(g.per[pi],r);
-      if(isPeriodCol){addPivotAgg(getAgg(grand,ck(null,pi)),r)}
-      else if(colSet.has(colV)){const k=ck(colV,pi);addPivotAgg(getAgg(g.cells,k),r);addPivotAgg(getAgg(grand,k),r)}
-      if(wantSubtotal){let s=row1.get(values[0]);if(!s){s={per:Array.from({length:P},newPivotAgg),cells:new Map()};row1.set(values[0],s)}addPivotAgg(s.per[pi],r);if(!isPeriodCol&&colSet.has(colV))addPivotAgg(getAgg(s.cells,ck(colV,pi)),r)}
+      add(g.per[pi],r);
+      if(isPeriodCol){add(getAgg(grand,ck(null,pi)),r)}
+      else if(colSet.has(colV)){const k=ck(colV,pi);add(getAgg(g.cells,k),r);add(getAgg(grand,k),r)}
+      if(wantSubtotal){let s=row1.get(values[0]);if(!s){s={per:Array.from({length:P},na),cells:new Map()};row1.set(values[0],s)}add(s.per[pi],r);if(!isPeriodCol&&colSet.has(colV))add(getAgg(s.cells,ck(colV,pi)),r)}
     }
   });
 
@@ -2120,7 +2130,7 @@ async function pivotAnalysisStreaming(periods,filters,request){
     return out;
   }
   function sumCells(list){
-    const per=Array.from({length:P},newPivotAgg),cells=new Map();
+    const per=Array.from({length:P},na),cells=new Map();
     for(const g of list){for(let pi=0;pi<P;pi++)mergePivotAgg(per[pi],g.per[pi]);for(const [k,a] of g.cells)mergePivotAgg(getAgg(cells,k),a)}
     return cellsOf(per,cells);
   }
@@ -2149,7 +2159,7 @@ async function pivotAnalysisStreaming(periods,filters,request){
     itemFilterCount,totalRowGroups:ranked.length,shownRowGroups:outRows.length,rowTruncated:ranked.length>outRows.length,
     columnValueCountAll,columnValueCountShown:isPeriodCol?P:columnValues.length,columnTruncated,
     displayedTotal:sumCells(selected),grandTotal:grandOut,
-    limits:{maxRowGroups:PIVOT_MAX_ROW_GROUPS,maxLeafColumns:PIVOT_MAX_LEAF_COLUMNS,maxShowRows:PIVOT_MAX_SHOW_ROWS}
+    limits:{maxRowGroups:PIVOT_STREAM_MAX_GROUPS,maxLeafColumns:PIVOT_MAX_LEAF_COLUMNS,maxShowRows:PIVOT_MAX_SHOW_ROWS}
   };
 }
 
@@ -3982,4 +3992,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V60.1 Pivot streaming + item sub-field: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V60.2 Pivot streaming (60k groups) + item sub-field: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Pivot Analysis V51 server-side: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
