@@ -120,13 +120,13 @@
     if(!H2C()){const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';document.head.appendChild(sc)}
     function png(id,n){const a=document.createElement('a');a.download=n.replace(/\\s+/g,'_').toLowerCase()+'.png';a.href=document.getElementById(id).toDataURL('image/png');a.click()}
     async function itemPng(i,n){const h=H2C();if(!h)return alert('Library belum termuat, coba lagi beberapa detik');const el=document.getElementById('items'+i);const c=await h(el,{backgroundColor:'#fff',scale:2});const a=document.createElement('a');a.download=n.replace(/\\s+/g,'_').toLowerCase()+'_item.png';a.href=c.toDataURL('image/png');a.click()}
-    async function cardPng(i,n){const h=H2C();if(!h)return alert('Library belum termuat, coba lagi beberapa detik');const el=document.getElementById('card'+i),t=el.querySelector('.tools');t.style.visibility='hidden';const c=await h(el,{backgroundColor:'#fff',scale:2});t.style.visibility='';const a=document.createElement('a');a.download=n.replace(/\\s+/g,'_').toLowerCase()+'_chart_item.png';a.href=c.toDataURL('image/png');a.click()}
+    async function cardPng(i,n){const h=H2C();if(!h)return alert('Library belum termuat, coba lagi beberapa detik');const el=document.getElementById('card'+i),t=el.querySelector('.tools');t.style.display='none';const c=await h(el,{backgroundColor:'#fff',scale:2});t.style.display='';const a=document.createElement('a');a.download=n.replace(/\\s+/g,'_').toLowerCase()+'_chart_item.png';a.href=c.toDataURL('image/png');a.click()}
     function rgba(hex,a){const n=parseInt(hex.slice(1),16);return 'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')'}
     D.forEach((d,i)=>{
-      const W=1000,H=520,L=30,R=30,T=110,B=90,c=document.getElementById('chart'+i),dpr=devicePixelRatio||1;
+      const W=1000,H=488,L=30,R=30,T=78,B=90,c=document.getElementById('chart'+i),dpr=devicePixelRatio||1;
       c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);
       x.fillStyle='#fff';x.fillRect(0,0,W,H);
-      x.fillStyle='#595959';x.font='bold 26px Arial';x.textAlign='center';x.fillText('Target Achievement '+d.name,W/2,44);
+      x.fillStyle='#595959';x.font='bold 26px Arial';x.textAlign='center';x.fillText('Target Achievement '+d.name,W/2,32);
       const cw=W-L-R,ch=H-T-B,n=d.monthly.length,gw=cw/n,tw=gw*0.72,sw=gw*0.52;
       const max=Math.max(...d.monthly.map(m=>Math.max(m.sales,m.target)),1),base=T+ch;
       x.strokeStyle='#bfbfbf';x.beginPath();x.moveTo(L,base);x.lineTo(W-R,base);x.stroke();
