@@ -1940,8 +1940,14 @@ function envText(name, fallback=''){
   return v===undefined || v===null ? fallback : String(v).trim();
 }
 
-function metabaseSettings(){
-  return {
+// V65: two Metabase sources. "new" (default) = metabase.apotekwellings.my.id Q626,
+// sales measure = sales_gross. "old" = previous Q364 with sub_total_inv.
+const METABASE_SOURCES=['new','old'];
+function normalizeMetabaseSource(v){return String(v||'').toLowerCase()==='old'?'old':'new'}
+function metabaseSettings(source='new'){
+  const src=normalizeMetabaseSource(source);
+  if(src==='old')return {
+    source:'old',label:'Metabase Old',salesField:'sub_total_inv',
     baseUrl:envText('METABASE_URL','https://wrpt.rcloud.id').replace(/\/+$/,''),
     username:envText('METABASE_USERNAME'),
     password:envText('METABASE_PASSWORD'),
@@ -1950,10 +1956,20 @@ function metabaseSettings(){
     endParamId:envText('METABASE_END_PARAM_ID','8d7c1ee3-44a3-45e3-b056-dfb1fc99ca76'),
     triggerSecret:envText('AUTO_SYNC_SECRET')
   };
+  return {
+    source:'new',label:'Metabase New',salesField:'sales_gross',
+    baseUrl:envText('METABASE_NEW_URL','https://metabase.apotekwellings.my.id').replace(/\/+$/,''),
+    username:envText('METABASE_NEW_USERNAME')||envText('METABASE_USERNAME'),
+    password:envText('METABASE_NEW_PASSWORD')||envText('METABASE_PASSWORD'),
+    questionId:envText('METABASE_NEW_QUESTION_ID','626'),
+    startParamId:envText('METABASE_NEW_START_PARAM_ID','ecac4877-f35a-4239-ae98-b3b89a185db6'),
+    endParamId:envText('METABASE_NEW_END_PARAM_ID','993fb0ee-57ab-42f8-9a06-8c582c36ed70'),
+    triggerSecret:envText('AUTO_SYNC_SECRET')
+  };
 }
 
-function autoSyncConfigured(){
-  const s=metabaseSettings();
+function autoSyncConfigured(source='new'){
+  const s=metabaseSettings(source);
   // V36: manual-only Metabase update from authenticated Admin RUN NOW.
   return !!(s.baseUrl && s.username && s.password && s.questionId);
 }
@@ -2024,12 +2040,15 @@ function normalizedSchedulerSource(req){
 }
 
 function publicAutoSyncStatus(){
-  const s=metabaseSettings();
+  const s=metabaseSettings(autoSyncStatus.lastSource||'new');
+  const srcInfo=src=>{const x=metabaseSettings(src);return {label:x.label,questionId:x.questionId,salesField:x.salesField,configured:autoSyncConfigured(src),host:(()=>{try{return new URL(x.baseUrl).host}catch{return ''}})()}};
   return {
     ...autoSyncStatus,
-    running:!!autoSyncStatus.running,
-    configured:autoSyncConfigured(),
-    source:s.questionId?`Metabase Question ${s.questionId} • CSV Streaming`:'Metabase • CSV Streaming',
+    running:!!autoSyncStatus.running||!!bulkSync.running,
+    configured:autoSyncConfigured('new')||autoSyncConfigured('old'),
+    sources:{new:srcInfo('new'),old:srcInfo('old')},
+    bulk:{...bulkSync},
+    source:`${s.label} • Question ${s.questionId} • sales = ${s.salesField}`,
     metabaseHost:(()=>{try{return new URL(s.baseUrl).host}catch{return ''}})(),
     schedule:'Manual — Admin RUN NOW',
     timezone:'Asia/Jakarta',
@@ -2051,7 +2070,7 @@ function publicAutoSyncStatus(){
 }
 
 async function persistAutoSyncStatus(){
-  const safe={...autoSyncStatus,running:false,configured:autoSyncConfigured()};
+  const safe={...autoSyncStatus,running:false,configured:autoSyncConfigured('new')||autoSyncConfigured('old')};
   await writeJsonAtomic(AUTO_SYNC_FILE,safe);
 }
 
@@ -2555,7 +2574,7 @@ async function openMetabaseCsvWithSessionReuse(settings,startDate,endDate){
   }
 }
 
-async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
+async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth,salesField='sub_total_inv'){
   const targetFile=monthPath(targetMonth);
   await fsp.mkdir(path.dirname(targetFile),{recursive:true});
 
@@ -2612,6 +2631,10 @@ async function streamReplaceMonthFromMetabaseCsv(webBody,targetMonth){
         raw[header[i]]=cells[i]??'';
       }
 
+      if(salesField==='sales_gross'){
+        if(!('sales_gross' in raw))throw new Error('Kolom sales_gross tidak ada di hasil Metabase New. Periksa Question di Metabase.');
+        if(String(raw.sales_gross??'').trim()!=='')raw.sub_total_inv=raw.sales_gross;
+      }
       const n=normalizeRow(raw);
       if(!(n.date && n.invoice && n.channel))continue;
 
@@ -2787,8 +2810,8 @@ async function finalizeAutomatedMonthReplace(targetMonth,sourceFile,fileSize,str
   return {entry,coverage,replacedRows};
 }
 
-async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requestedRange=null){
-  if(autoSyncStatus.running) {
+async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requestedRange=null, source='new', fromBulk=false){
+  if(autoSyncStatus.running || (bulkSync.running && !fromBulk)) {
     const e=new Error('AUTO_SYNC_ALREADY_RUNNING');
     e.statusCode=409;
     throw e;
@@ -2799,9 +2822,9 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
     throw e;
   }
 
-  const settings=metabaseSettings();
-  if(!autoSyncConfigured()){
-    const e=new Error('AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME and METABASE_PASSWORD in Railway Variables.');
+  const settings=metabaseSettings(source);
+  if(!autoSyncConfigured(source)){
+    const e=new Error(`AUTO_SYNC_NOT_CONFIGURED (${settings.label}). Isi username & password Metabase di Railway Variables.`);
     e.statusCode=503;
     throw e;
   }
@@ -2831,6 +2854,7 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
     lastEndDate:range.endDate,
     lastTargetMonth:range.targetMonth,
     lastTrigger:trigger,
+    lastSource:settings.source,
     ...(schedulerTrigger?{
       lastSchedulerAttemptAt:attemptAt,
       lastSchedulerResult:'RUNNING',
@@ -2843,17 +2867,17 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
   dataWriteOwner=`auto-sync:${trigger}`;
 
   try{
-    console.log(`[AUTO_SYNC] start trigger=${trigger} range=${range.startDate}..${range.endDate} export=csv-stream-urlencoded`);
+    console.log(`[AUTO_SYNC] start trigger=${trigger} source=${settings.label} Q${settings.questionId} sales=${settings.salesField} range=${range.startDate}..${range.endDate}`);
 
     const chunkInfo={chunks:[],authMode:null,current:null};
     console.log(`[AUTO_SYNC] chunked export: ${METABASE_CHUNK_DAYS} day(s) per request`);
     const streamed=await streamReplaceMonthFromMetabaseCsv(
-      ()=>metabaseChunkBodies(settings,range.startDate,range.endDate,chunkInfo),range.targetMonth
+      ()=>metabaseChunkBodies(settings,range.startDate,range.endDate,chunkInfo),range.targetMonth,settings.salesField
     );
     const authMode=chunkInfo.authMode||'session';
     console.log(`[AUTO_SYNC] Metabase auth=${authMode} chunks=${chunkInfo.chunks.length}`);
 
-    const sourceFile=`Metabase Q${settings.questionId} ${range.startDate} to ${range.endDate}.csv`;
+    const sourceFile=`${settings.label} Q${settings.questionId} (${settings.salesField}) ${range.startDate} to ${range.endDate}.csv`;
     const contentLength=0;
     const finalized=await finalizeAutomatedMonthReplace(
       range.targetMonth,sourceFile,contentLength,streamed,trigger
@@ -2907,7 +2931,7 @@ async function runMetabaseAutoSync(trigger='manual', schedulerSlotKey=null, requ
     autoSyncStatus={
       ...autoSyncStatus,
       running:false,
-      configured:autoSyncConfigured(),
+      configured:autoSyncConfigured(source),
       lastResult:'FAILED',
       lastError:String(e.message||e).slice(0,800),
       lastDurationMs:Date.now()-started,
@@ -3478,6 +3502,42 @@ function noStoreApiResponse(res){
   });
 }
 
+// V65: refresh several months in one background job (one month at a time, so
+// memory stays at the level of a single-month sync).
+let bulkSync={running:false};
+function monthRangeList(from,to){const out=[];let [y,m]=from.split('-').map(Number);const [ty,tm]=to.split('-').map(Number);while((y<ty||(y===ty&&m<=tm))&&out.length<48){out.push(`${y}-${String(m).padStart(2,'0')}`);m++;if(m>12){m=1;y++}}return out}
+async function runMetabaseBulk(trigger,fromMonth,toMonth,source){
+  const months=monthRangeList(fromMonth,toMonth);
+  const current=resolveAutoSyncDateRange(null);
+  bulkSync={running:true,source,fromMonth,toMonth,total:months.length,done:0,ok:[],failed:[],current:null,cancelRequested:false,startedAt:new Date().toISOString(),finishedAt:null};
+  try{
+    for(const mk of months){
+      if(bulkSync.cancelRequested)break;
+      bulkSync.current=mk;
+      const range=mk===current.targetMonth?null:{mode:'manual',startDate:`${mk}-01`,endDate:`${mk}-${String(daysInMonth(mk+'-01')).padStart(2,'0')}`};
+      try{
+        const r=await runMetabaseAutoSync(trigger,null,range,source,true);
+        bulkSync.ok.push({month:mk,rows:r.rows});
+      }catch(e){
+        bulkSync.failed.push({month:mk,error:String(e.message||e).slice(0,200)});
+        console.error(`[AUTO_SYNC] bulk ${mk} failed: ${e.message}`);
+      }
+      bulkSync.done++;
+      if(typeof global.gc==='function')global.gc();
+    }
+  }finally{
+    bulkSync={...bulkSync,running:false,current:null,finishedAt:new Date().toISOString(),cancelled:!!bulkSync.cancelRequested};
+    autoSyncStatus={...autoSyncStatus,lastBulk:{...bulkSync}};
+    await persistAutoSyncStatus().catch(()=>{});
+  }
+}
+app.post('/api/admin/auto-sync/bulk-cancel', requireAdmin, (req,res)=>{
+  noStoreApiResponse(res);
+  if(!bulkSync.running)return res.status(400).json({error:'Tidak ada refresh beberapa bulan yang sedang berjalan.'});
+  bulkSync.cancelRequested=true;
+  res.json({ok:true,message:'Akan berhenti setelah bulan yang sedang diproses selesai.'});
+});
+
 app.get('/api/admin/auto-sync/status', requireAdmin, (req,res)=>{
   noStoreApiResponse(res);
   res.json(publicAutoSyncStatus());
@@ -3488,19 +3548,32 @@ app.post('/api/admin/auto-sync/run', requireAdmin, (req,res)=>{
 
   try{
     // Reject duplicate/manual writes before starting a background job.
-    if(autoSyncStatus.running){
+    if(autoSyncStatus.running||bulkSync.running){
       return res.status(409).json({error:'AUTO_SYNC_ALREADY_RUNNING'});
     }
     if(dataWriteBusy){
       return res.status(409).json({error:`DATA_WRITE_BUSY${dataWriteOwner?`: ${dataWriteOwner}`:''}`});
     }
-    if(!autoSyncConfigured()){
+    const source=normalizeMetabaseSource(req.body?.source);
+    if(!autoSyncConfigured(source)){
       return res.status(503).json({
-        error:'AUTO_SYNC_NOT_CONFIGURED. Add METABASE_USERNAME and METABASE_PASSWORD in Railway Variables.'
+        error:`AUTO_SYNC_NOT_CONFIGURED (${metabaseSettings(source).label}). Isi username & password Metabase di Railway Variables.`
       });
     }
 
-    const mode=String(req.body?.mode||'current').toLowerCase()==='manual'?'manual':'current';
+    const rawMode=String(req.body?.mode||'current').toLowerCase();
+    if(rawMode==='bulk'){
+      const fromMonth=String(req.body?.fromMonth||''),toMonth=String(req.body?.toMonth||'');
+      if(!/^\d{4}-\d{2}$/.test(fromMonth)||!/^\d{4}-\d{2}$/.test(toMonth)||fromMonth>toMonth)return res.status(400).json({error:'Pilih Bulan Awal dan Bulan Akhir yang benar.'});
+      const months=monthRangeList(fromMonth,toMonth);
+      const cur=resolveAutoSyncDateRange(null).targetMonth;
+      const bad=months.find(m=>!monthAllowed(m)||m>cur);
+      if(bad)return res.status(400).json({error:`Bulan ${bad} di luar rentang yang diizinkan.`});
+      const trigger=`admin:${req.user.username}`;
+      void runMetabaseBulk(trigger,fromMonth,toMonth,source).catch(e=>console.error('[AUTO_SYNC] bulk rejected',e.message));
+      return res.status(202).json({ok:true,accepted:true,result:'RUNNING',mode:'bulk',fromMonth,toMonth,total:months.length,source});
+    }
+    const mode=rawMode==='manual'?'manual':'current';
     const requestedRange=mode==='manual'?{
       mode:'manual',
       startDate:String(req.body?.startDate||'').trim(),
@@ -3520,7 +3593,7 @@ app.post('/api/admin/auto-sync/run', requireAdmin, (req,res)=>{
     // while Railway/proxy may close a long HTTP request at ~5 minutes.
     // runMetabaseAutoSync marks the server state RUNNING synchronously before
     // its first network await, then continues in the background.
-    void runMetabaseAutoSync(trigger,null,requestedRange).catch(e=>{
+    void runMetabaseAutoSync(trigger,null,requestedRange,source).catch(e=>{
       // runMetabaseAutoSync already stores FAILED + lastError. This catch
       // prevents an unhandled Promise rejection after the 202 response.
       console.error(`[AUTO_SYNC] background job rejected trigger=${trigger}:`,e.message);
@@ -3777,4 +3850,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sub_total_inv | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sales_gross (Metabase New) / sub_total_inv (Old & Excel) | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | V65 Metabase New (sales_gross) + bulk refresh: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
