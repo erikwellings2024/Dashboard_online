@@ -159,6 +159,17 @@ async function loadAutoSyncStatus(){
     ?`RUN NOW • ${trig.slice(6)}`
     :(trig||'-');
   $('#runAutoSync').disabled=!s.configured||s.running;
+  // V65: source info + bulk progress
+  const si=s.sources||{};
+  const srcTxt=x=>x?`Question ${x.questionId} • sales = ${x.salesField} • ${x.host}${x.configured?'':' • BELUM ADA CREDENTIAL'}`:'';
+  if($('#syncSourceNewInfo'))$('#syncSourceNewInfo').textContent=srcTxt(si.new);
+  if($('#syncSourceOldInfo'))$('#syncSourceOldInfo').textContent=srcTxt(si.old);
+  const bk=s.bulk||{};
+  const cancel=$('#cancelBulkSync');if(cancel)cancel.classList.toggle('hidden',!bk.running);
+  if(bk.running){
+    $('#autoSyncResult').textContent=`RUNNING • bulan ${Math.min(bk.done+1,bk.total)}/${bk.total}`;
+    $('#autoSyncResult').className='status-running';
+  }
 
   const err=$('#autoSyncError');
   if(s.lastError){
@@ -197,23 +208,64 @@ function initAutoSyncPeriodControls(){
   if(start){start.min='2025-01-01';start.max=todayText}
   if(end){end.min='2025-01-01';end.max=todayText}
 
+  // V65 bulk month selects: Jan 2025 .. current month
+  const curMonth=todayText.slice(0,7),monthsList=[];
+  for(let y=2025,m=1;`${y}-${String(m).padStart(2,'0')}`<=curMonth;m++){if(m>12){m=1;y++}const k=`${y}-${String(m).padStart(2,'0')}`;if(k>curMonth)break;monthsList.push(k)}
+  const mLabel=k=>new Date(k+'-01T00:00:00').toLocaleDateString('id-ID',{month:'short',year:'numeric'});
+  const fm=$('#autoSyncFromMonth'),tm=$('#autoSyncToMonth');
+  if(fm&&!fm.options.length){fm.innerHTML=monthsList.map(k=>`<option value="${k}">${mLabel(k)}</option>`).join('');fm.value=monthsList[0]}
+  if(tm&&!tm.options.length){tm.innerHTML=monthsList.map(k=>`<option value="${k}">${mLabel(k)}</option>`).join('');tm.value=curMonth}
+
   $$('input[name="autoSyncPeriodMode"]').forEach(r=>r.onchange=()=>{
-    const manual=syncPeriodMode()==='manual';
+    const mode=syncPeriodMode(),manual=mode==='manual',bulk=mode==='bulk';
     $('#autoSyncManualRange').classList.toggle('hidden',!manual);
+    $('#autoSyncBulkRange').classList.toggle('hidden',!bulk);
     const rule=$('#autoSyncDateRule');
-    if(rule)rule.textContent=manual?'Manual: 1 bulan • Replace month':'Default: bulan berjalan';
+    if(rule)rule.textContent=bulk?'Beberapa bulan • Replace per bulan':manual?'Manual: 1 bulan • Replace month':'Default: bulan berjalan';
   });
 }
 
+function selectedAutoSyncSource(){
+  return document.querySelector('input[name="autoSyncSource"]:checked')?.value||'new';
+}
 function selectedAutoSyncRequest(){
-  const mode=syncPeriodMode();
-  if(mode!=='manual')return {mode:'current'};
+  const mode=syncPeriodMode(),source=selectedAutoSyncSource();
+  if(mode==='bulk'){
+    const fromMonth=$('#autoSyncFromMonth').value,toMonth=$('#autoSyncToMonth').value;
+    if(!fromMonth||!toMonth||fromMonth>toMonth)throw new Error('Bulan Awal harus sebelum atau sama dengan Bulan Akhir.');
+    return {mode:'bulk',fromMonth,toMonth,source};
+  }
+  if(mode!=='manual')return {mode:'current',source};
 
   const startDate=$('#autoSyncStartDate').value;
   const endDate=$('#autoSyncEndDate').value;
   if(!startDate || !endDate)throw new Error('Pilih Start Date dan End Date.');
 
-  return {mode:'manual',startDate,endDate};
+  return {mode:'manual',startDate,endDate,source};
+}
+if($('#cancelBulkSync'))$('#cancelBulkSync').onclick=async()=>{
+  if(!confirm('Hentikan refresh beberapa bulan? Bulan yang sedang diproses tetap diselesaikan dulu.'))return;
+  try{const r=await api('/api/admin/auto-sync/bulk-cancel',{method:'POST',body:'{}'});msg('#autoSyncMsg',r.message)}catch(e){msg('#autoSyncMsg',e.message,false)}
+};
+async function runBulkAutoSync(request){
+  const b=$('#runAutoSync');
+  const srcLabel=request.source==='old'?'Metabase Old':'Metabase New';
+  const accepted=await api('/api/admin/auto-sync/run',{method:'POST',body:JSON.stringify(request)});
+  b.textContent='SYNCING...';
+  const started=Date.now();let s=null;
+  while(Date.now()-started<4*60*60*1000){
+    await new Promise(r=>setTimeout(r,5000));
+    s=await loadAutoSyncStatus();
+    const bk=s.bulk||{};
+    msg('#autoSyncMsg',`${srcLabel} • Refresh ${accepted.total} bulan (${accepted.fromMonth} → ${accepted.toMonth}) • sedang: ${bk.current||'-'} • selesai ${bk.done||0}/${bk.total||accepted.total} • berhasil ${(bk.ok||[]).length} • gagal ${(bk.failed||[]).length}`);
+    if(!bk.running)break;
+  }
+  const bk=s?.bulk||s?.lastBulk||{};
+  const failed=bk.failed||[];
+  const summary=`Selesai${bk.cancelled?' (dihentikan)':''}: ${(bk.ok||[]).length} bulan berhasil, ${failed.length} gagal.`;
+  if(failed.length)msg('#autoSyncMsg',`${summary} Gagal: ${failed.map(f=>f.month).join(', ')}. Ulangi bulan tersebut lewat Periode Manual atau jalankan lagi rentangnya.`,false);
+  else msg('#autoSyncMsg',summary);
+  META=await api('/api/meta');renderRuntime();renderMonthStorage();renderUploadHistory();
 }
 
 $('#runAutoSync').onclick=async()=>{
@@ -227,13 +279,24 @@ $('#runAutoSync').onclick=async()=>{
   }
 
   let confirmText='';
+  const srcLabel=request.source==='old'?'Metabase Old (sales = sub_total_inv)':'Metabase New (sales = sales_gross)';
+  if(request.mode==='bulk'){
+    const n=(()=>{let [y,m]=request.fromMonth.split('-').map(Number),c=0;const [ty,tm]=request.toMonth.split('-').map(Number);while(y<ty||(y===ty&&m<=tm)){c++;m++;if(m>12){m=1;y++}}return c})();
+    if(!confirm(`Refresh ${n} bulan (${request.fromMonth} → ${request.toMonth}) dari ${srcLabel}?\n\nPERHATIAN: data setiap bulan tersebut akan DIREPLACE seluruhnya.\nPerkiraan waktu ±${Math.ceil(n*2)} menit. Halaman ini boleh ditutup; proses tetap berjalan di server.`))return;
+    try{
+      b.disabled=true;b.textContent='STARTING...';
+      await runBulkAutoSync(request);
+    }catch(e){msg('#autoSyncMsg',e.message,false)}
+    finally{b.textContent='RUN NOW';const s=await loadAutoSyncStatus().catch(()=>null);b.disabled=!s?.configured||!!s?.running}
+    return;
+  }
   if(request.mode==='manual'){
     const targetMonth=request.startDate.slice(0,7);
     confirmText=
-      `Update Sales Metabase periode ${request.startDate} → ${request.endDate}?\n\n`+
+      `Update Sales dari ${srcLabel}\nperiode ${request.startDate} → ${request.endDate}?\n\n`+
       `PERHATIAN: data folder ${targetMonth} yang sudah ada akan DIREPLACE seluruhnya oleh hasil update ini.`;
   }else{
-    confirmText='Jalankan Update Sales bulan berjalan dari tanggal 1 sampai hari ini? Data bulan berjalan akan direplace dengan hasil terbaru.';
+    confirmText=`Jalankan Update Sales bulan berjalan dari ${srcLabel}, tanggal 1 sampai hari ini? Data bulan berjalan akan direplace dengan hasil terbaru.`;
   }
 
   if(!confirm(confirmText))return;

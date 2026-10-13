@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20261008-57"></head>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — Sales Dashboard</title><link rel="stylesheet" href="/app.css?v=20261013-65"></head>
 <body>
 <header class="topbar"><div class="brand"><h1>Admin Settings</h1><p>Upload raw, master channel/store/PT/Store Stat, target online/category, mapping category, auto update sales, dan manage user</p></div><div class="actions"><a class="btn" href="/dashboard.html">← Dashboard</a><span class="user-chip" id="userChip">...</span><button class="btn" id="logoutBtn">Logout</button></div></header>
 <main class="admin-page">
@@ -93,10 +93,20 @@
 <div class="admin-box">
   <h2>Update Sales dari Metabase</h2>
   <p>
-    Update sales dari Metabase Question 364 dijalankan <b>manual oleh Admin melalui tombol RUN NOW</b>.
-    Pilih <b>Bulan Berjalan</b> untuk update normal tanggal 1 sampai hari ini, atau <b>Periode Manual</b>
-    untuk mengganti data satu bulan tertentu. Tidak ada scheduler otomatis.
+    Update sales dari Metabase dijalankan <b>manual oleh Admin melalui tombol RUN NOW</b>.
+    Pilih sumber data, lalu <b>Bulan Berjalan</b>, <b>Periode Manual</b> (satu bulan), atau
+    <b>Refresh Beberapa Bulan</b> sekaligus. Tidak ada scheduler otomatis.
   </p>
+
+  <div class="sync-period-box">
+    <div class="sync-period-title">SUMBER DATA</div>
+    <div class="sync-source-row">
+      <label class="sync-source-option"><input type="radio" name="autoSyncSource" value="new" checked>
+        <span><b>Metabase New (Default)</b><small id="syncSourceNewInfo">Question 626 • sales = sales_gross</small></span></label>
+      <label class="sync-source-option"><input type="radio" name="autoSyncSource" value="old">
+        <span><b>Metabase Old</b><small id="syncSourceOldInfo">Question 364 • sales = sub_total_inv</small></span></label>
+    </div>
+  </div>
 
   <div class="sync-period-box">
     <div class="sync-period-title">PERIODE SALES YANG AKAN DIUPDATE</div>
@@ -108,6 +118,26 @@
       <input type="radio" name="autoSyncPeriodMode" value="manual">
       <span><b>2. Periode Manual</b><small>Pilih periode dalam satu bulan untuk update bulan sebelumnya</small></span>
     </label>
+
+    <label class="sync-period-option">
+      <input type="radio" name="autoSyncPeriodMode" value="bulk">
+      <span><b>3. Refresh Beberapa Bulan</b><small>Proses bulan demi bulan di background, misalnya Jan 2025 – bulan ini</small></span>
+    </label>
+
+    <div id="autoSyncBulkRange" class="sync-manual-range hidden">
+      <div>
+        <label>Bulan Awal</label>
+        <select id="autoSyncFromMonth"></select>
+      </div>
+      <div>
+        <label>Bulan Akhir</label>
+        <select id="autoSyncToMonth"></select>
+      </div>
+      <div class="sync-replace-warning">
+        <b>REPLACE MONTH:</b> setiap bulan dalam rentang ini akan diganti seluruhnya oleh data Metabase.
+        Perkiraan ±2 menit per bulan. Bulan yang gagal dilewati dan dicatat, bisa diulang setelahnya.
+      </div>
+    </div>
 
     <div id="autoSyncManualRange" class="sync-manual-range hidden">
       <div>
@@ -146,11 +176,11 @@
 
   <div class="auto-sync-actions">
     <button class="btn green" id="runAutoSync">RUN NOW</button>
-    <button class="btn" id="refreshAutoSync">Refresh Status</button>
+    <button class="btn hidden" id="cancelBulkSync" type="button">STOP setelah bulan ini</button><button class="btn" id="refreshAutoSync">Refresh Status</button>
   </div>
   <div id="autoSyncMsg"></div>
   <div id="autoSyncError" class="auto-sync-error hidden"></div>
 </div>
 </section>
 <section class="admin-panel" id="tab-users"><div class="admin-box"><h2>User Management</h2><p>Admin dapat membuat akun Admin/Guest, reset password, ubah role, aktif/nonaktifkan, dan menghapus user. Guest tidak memiliki akses ke halaman ini.</p><div class="form-row"><div><label>Username</label><input id="newUsername"></div><div><label>Display Name</label><input id="newDisplayName"></div><div><label>Password</label><input id="newPassword" type="password"></div><div><label>Role</label><select id="newRole"><option value="guest">Guest</option><option value="admin">Admin</option></select></div><div><button class="btn green" id="addUser">Add User</button></div></div><div class="table-wrap" style="margin-top:10px"><table class="admin-table" id="userTable"><thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Active</th><th>New Password</th><th>Action</th></tr></thead><tbody></tbody></table></div><div id="userMsg"></div></div></section>
-</main><script src="/admin.js?v=20261008-53"></script><script src="/admin-halodoc.js?v=20261008-57"></script></body></html>
+</main><script src="/admin.js?v=20261013-65"></script><script src="/admin-halodoc.js?v=20261008-57"></script></body></html>

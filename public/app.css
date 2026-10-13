@@ -1894,3 +1894,11 @@ body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100
 .pv-adv .pivot-builder-row{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:6px;margin-bottom:6px;font-size:11px}
 .pv-reset{width:100%;padding:5px;font-size:11px}
 @media(max-width:1100px){.pv-layout{grid-template-columns:1fr}.pv-fields .pv-field-group{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+
+/* V65 Metabase source selector */
+.sync-source-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+.sync-source-option{display:flex;gap:8px;align-items:flex-start;border:1px solid #c9d1d9;padding:8px 12px;cursor:pointer;background:#fff;min-width:260px}
+.sync-source-option span{display:flex;flex-direction:column}
+.sync-source-option small{font-size:11px;color:#667085;margin-top:2px}
+.sync-source-option:has(input:checked){border-color:#4d9a63;background:#f1f8f3}
+#autoSyncBulkRange select{min-width:160px}
