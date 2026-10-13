@@ -75,6 +75,7 @@ storeStats:clone(META.storeStats||['Existing Store','New Store']),
 channels:clone(META.channels)
 };
 S.channel={periods:clone(p),prevCount:2,product:'',productLabel:'',filters:{stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.categoryPerf={periods:clone(p),prevCount:2,product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.target={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEstMonth:p[0].end.slice(0,7),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.categoryTarget={period:clone(p[0]),bestEstDays:daysInMonthISO(p[0].end),bestEstMonth:p[0].end.slice(0,7),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.store={periods:clone(p),prevCount:2,metricMode:'value',product:'',productLabel:'',filters:{pts:['EFM','EFIT','ESB'],stores:clone(common.stores),channels:clone(common.channels),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
@@ -145,6 +146,17 @@ function activeFilterChips(section){
   let chips='';
 
   if(section==='channel'){
+    chips+=activeMultiChip('Store',s.filters.stores,META.stores);
+    chips+=activeMultiChip('Category',s.filters.categories,META.categories);
+    chips+=activeMultiChip('Brand',s.filters.brands,META.brands);
+    chips+=activeMultiChip('Sales Type',s.filters.salesTypes,META.salesTypes);
+    chips+=activeMultiChip('Customer Type',s.filters.customerTypes,META.customerTypes||[]);
+    chips+=activeMultiChip('Store Stat',s.filters.storeStats,META.storeStats||[]);
+    chips+=activeProductChip(s);
+  }
+
+  if(section==='categoryPerf'){
+    chips+=activeMultiChip('Channel',s.filters.channels,META.channels);
     chips+=activeMultiChip('Store',s.filters.stores,META.stores);
     chips+=activeMultiChip('Category',s.filters.categories,META.categories);
     chips+=activeMultiChip('Brand',s.filters.brands,META.brands);
@@ -226,29 +238,30 @@ function activeFilterChips(section){
 function renderFilters(){
   const p=S.channel.periods;
   $('#channelFilters').innerHTML=`<div class="filter-grid">${rangeControl('channel','p0','Current Period',p[0])}${previous1Control('channel',p[1],S.channel.prevCount>=1)}${previous2Control('channel',p[2],S.channel.prevCount===2)}${multiControl('channel','stores','Store',META.stores,S.channel.filters.stores,true)}${multiControl('channel','categories','Category',META.categories,S.channel.filters.categories,true)}${multiControl('channel','brands','Brand',META.brands,S.channel.filters.brands,true)}${multiControl('channel','salesTypes','Sales Type',META.salesTypes,S.channel.filters.salesTypes)}${multiControl('channel','customerTypes','Customer Type',META.customerTypes||[],S.channel.filters.customerTypes)}${multiControl('channel','storeStats','Store Stat',META.storeStats||[],S.channel.filters.storeStats)}${productPicker('channel','Item (SKU / Name)')}<button class="apply" data-apply="channel">APPLY</button></div><div class="chips"><span class="chip"><b>Section 1 only</b></span>${activeFilterChips('channel')}</div>`;
+  $('#categoryPerfFilters').innerHTML=`<div class="filter-grid">${rangeControl('categoryPerf','p0','Current Period',p[0])}${previous1Control('categoryPerf',p[1],S.categoryPerf.prevCount>=1)}${previous2Control('categoryPerf',p[2],S.categoryPerf.prevCount===2)}${multiControl('categoryPerf','channels','Channel',META.channels,S.categoryPerf.filters.channels,true)}${multiControl('categoryPerf','stores','Store',META.stores,S.categoryPerf.filters.stores,true)}${multiControl('categoryPerf','categories','Category',META.categories,S.categoryPerf.filters.categories,true)}${multiControl('categoryPerf','brands','Brand',META.brands,S.categoryPerf.filters.brands,true)}${multiControl('categoryPerf','salesTypes','Sales Type',META.salesTypes,S.categoryPerf.filters.salesTypes)}${multiControl('categoryPerf','customerTypes','Customer Type',META.customerTypes||[],S.categoryPerf.filters.customerTypes)}${multiControl('categoryPerf','storeStats','Store Stat',META.storeStats||[],S.categoryPerf.filters.storeStats)}${productPicker('categoryPerf','Item (SKU / Name)')}<button class="apply" data-apply="categoryPerf">APPLY</button></div><div class="chips"><span class="chip"><b>Section 3 only</b></span>${activeFilterChips('categoryPerf')}</div>`;
 
   const t=S.target;
   // Section 2: Channel and Brand filters intentionally removed.
   $('#targetFilters').innerHTML=`<div class="filter-grid">${rangeControl('target','period','Actual Period',t.period)}${multiControl('target','stores','Store',META.stores,t.filters.stores,true)}${multiControl('target','salesTypes','Sales Type',META.salesTypes,t.filters.salesTypes)}${multiControl('target','customerTypes','Customer Type',META.customerTypes||[],t.filters.customerTypes)}${multiControl('target','storeStats','Store Stat',META.storeStats||[],t.filters.storeStats)}${numberControl('target','bestEstDays','Days Total Best Estimate',t.bestEstDays)}<button class="apply" data-apply="target">APPLY</button></div><div class="chips"><span class="chip"><b>Section 2 only</b></span>${timeFactorChip(t.period)}</div>`;
 
   const ct=S.categoryTarget;
-  $('#categoryTargetFilters').innerHTML=`<div class="filter-grid">${rangeControl('categoryTarget','period','Actual Period',ct.period)}${multiControl('categoryTarget','channels','Channel',META.channels,ct.filters.channels,true)}${multiControl('categoryTarget','categories','Category',META.categories,ct.filters.categories,true)}${multiControl('categoryTarget','stores','Store',META.stores,ct.filters.stores,true)}${multiControl('categoryTarget','salesTypes','Sales Type',META.salesTypes,ct.filters.salesTypes)}${multiControl('categoryTarget','customerTypes','Customer Type',META.customerTypes||[],ct.filters.customerTypes)}${multiControl('categoryTarget','storeStats','Store Stat',META.storeStats||[],ct.filters.storeStats)}${numberControl('categoryTarget','bestEstDays','Days Total Best Estimate',ct.bestEstDays)}<button class="apply" data-apply="categoryTarget">APPLY</button></div><div class="chips"><span class="chip"><b>Section 3 only</b></span>${timeFactorChip(ct.period,'categoryTargetTimeFactor')}${activeFilterChips('categoryTarget')}</div>`;
+  $('#categoryTargetFilters').innerHTML=`<div class="filter-grid">${rangeControl('categoryTarget','period','Actual Period',ct.period)}${multiControl('categoryTarget','channels','Channel',META.channels,ct.filters.channels,true)}${multiControl('categoryTarget','categories','Category',META.categories,ct.filters.categories,true)}${multiControl('categoryTarget','stores','Store',META.stores,ct.filters.stores,true)}${multiControl('categoryTarget','salesTypes','Sales Type',META.salesTypes,ct.filters.salesTypes)}${multiControl('categoryTarget','customerTypes','Customer Type',META.customerTypes||[],ct.filters.customerTypes)}${multiControl('categoryTarget','storeStats','Store Stat',META.storeStats||[],ct.filters.storeStats)}${numberControl('categoryTarget','bestEstDays','Days Total Best Estimate',ct.bestEstDays)}<button class="apply" data-apply="categoryTarget">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${timeFactorChip(ct.period,'categoryTargetTimeFactor')}${activeFilterChips('categoryTarget')}</div>`;
 
   const st=S.store;
   const allowedStores=META.stores.filter(x=>st.filters.pts.includes(x.pt));
-  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${previous1Control('store',st.periods[1],st.prevCount>=1)}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 4 only</b></span>${activeFilterChips('store')}</div>`;
+  $('#storeFilters').innerHTML=`<div class="filter-grid">${rangeControl('store','p0','Current',st.periods[0])}${previous1Control('store',st.periods[1],st.prevCount>=1)}${previous2Control('store',st.periods[2],st.prevCount===2)}${multiControl('store','pts','PT',META.pts,st.filters.pts)}${multiControl('store','stores','Store',allowedStores,st.filters.stores.filter(x=>allowedStores.some(s=>s.name===x)),true)}${multiControl('store','channels','Channel',META.channels,st.filters.channels,true)}${multiControl('store','categories','Category',META.categories,st.filters.categories,true)}${multiControl('store','brands','Brand',META.brands,st.filters.brands,true)}${multiControl('store','salesTypes','Sales Type',META.salesTypes,st.filters.salesTypes)}${multiControl('store','customerTypes','Customer Type',META.customerTypes||[],st.filters.customerTypes)}${multiControl('store','storeStats','Store Stat',META.storeStats||[],st.filters.storeStats)}${productPicker('store','Item (SKU / Name)')}<button class="apply" data-apply="store">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('store')}</div>`;
 
   const b=S.brand;
-  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${previous1Control('brand',b.periods[1],b.prevCount>=1)}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 5 only</b></span>${activeFilterChips('brand')}</div>`;
+  $('#brandFilters').innerHTML=`<div class="filter-grid">${rangeControl('brand','p0','Current',b.periods[0])}${previous1Control('brand',b.periods[1],b.prevCount>=1)}${previous2Control('brand',b.periods[2],b.prevCount===2)}${multiControl('brand','channels','Channel',META.channels,b.filters.channels,true)}${multiControl('brand','stores','Store',META.stores,b.filters.stores,true)}${multiControl('brand','categories','Category',META.categories,b.filters.categories,true)}${multiControl('brand','salesTypes','Sales Type',META.salesTypes,b.filters.salesTypes)}${multiControl('brand','customerTypes','Customer Type',META.customerTypes||[],b.filters.customerTypes)}${multiControl('brand','storeStats','Store Stat',META.storeStats||[],b.filters.storeStats)}${selectControl('brand','topN','Show Top',[1,2,3,4,5,6,7,8,9,10],b.topN)}<button class="apply" data-apply="brand">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('brand')}</div>`;
 
   const it=S.item;
-  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${previous1Control('item',it.periods[1],it.prevCount>=1)}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 6 only</b></span>${activeFilterChips('item')}</div>`;
+  $('#itemFilters').innerHTML=`<div class="filter-grid">${rangeControl('item','p0','Current',it.periods[0])}${previous1Control('item',it.periods[1],it.prevCount>=1)}${previous2Control('item',it.periods[2],it.prevCount===2)}${multiControl('item','channels','Channel',META.channels,it.filters.channels,true)}${multiControl('item','stores','Store',META.stores,it.filters.stores,true)}${multiControl('item','categories','Category',META.categories,it.filters.categories,true)}${multiControl('item','brands','Brand',META.brands,it.filters.brands,true)}${multiControl('item','salesTypes','Sales Type',META.salesTypes,it.filters.salesTypes)}${multiControl('item','customerTypes','Customer Type',META.customerTypes||[],it.filters.customerTypes)}${multiControl('item','storeStats','Store Stat',META.storeStats||[],it.filters.storeStats)}${productPicker('item','Item (SKU / Name)')}${selectControl('item','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],it.topN)}<button class="apply" data-apply="item">APPLY</button></div><div class="chips"><span class="chip"><b>Section 7 only</b></span>${activeFilterChips('item')}</div>`;
 
   const dy=S.daily;
-  $('#dailyFilters').innerHTML=`<div class="filter-grid">${rangeControl('daily','period','Current Period',dy.period)}${multiControl('daily','channels','Channel',META.channels,dy.filters.channels,true)}${multiControl('daily','stores','Store',META.stores,dy.filters.stores,true)}${multiControl('daily','categories','Category',META.categories,dy.filters.categories,true)}${multiControl('daily','brands','Brand',META.brands,dy.filters.brands,true)}${multiControl('daily','salesTypes','Sales Type',META.salesTypes,dy.filters.salesTypes)}${multiControl('daily','customerTypes','Customer Type',META.customerTypes||[],dy.filters.customerTypes)}${multiControl('daily','storeStats','Store Stat',META.storeStats||[],dy.filters.storeStats)}${productPicker('daily','Item (SKU / Name)')}<button class="apply" data-apply="daily">APPLY</button></div><div class="chips"><span class="chip"><b>Section 7 only</b></span>${activeFilterChips('daily')}</div>`;
+  $('#dailyFilters').innerHTML=`<div class="filter-grid">${rangeControl('daily','period','Current Period',dy.period)}${multiControl('daily','channels','Channel',META.channels,dy.filters.channels,true)}${multiControl('daily','stores','Store',META.stores,dy.filters.stores,true)}${multiControl('daily','categories','Category',META.categories,dy.filters.categories,true)}${multiControl('daily','brands','Brand',META.brands,dy.filters.brands,true)}${multiControl('daily','salesTypes','Sales Type',META.salesTypes,dy.filters.salesTypes)}${multiControl('daily','customerTypes','Customer Type',META.customerTypes||[],dy.filters.customerTypes)}${multiControl('daily','storeStats','Store Stat',META.storeStats||[],dy.filters.storeStats)}${productPicker('daily','Item (SKU / Name)')}<button class="apply" data-apply="daily">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('daily')}</div>`;
 
   const is=S.itemSales;
-  $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${previous1Control('itemSales',is.periods[1],is.prevCount>=1)}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 8 only</b></span>${activeFilterChips('itemSales')}</div>`;
+  $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${previous1Control('itemSales',is.periods[1],is.prevCount>=1)}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 9 only</b></span>${activeFilterChips('itemSales')}</div>`;
 
 
   bindFilters();
@@ -594,6 +607,7 @@ function reqFilters(sec){return clone(S[sec].filters)}
 
 async function loadSection(sec){try{
 if(sec==='channel'){showLoad('#channelTable');const filters=reqFilters('channel');filters.product=S.channel.product;const d=await api('/api/query/channel',{method:'POST',body:JSON.stringify({periods:periodsFor('channel'),filters})});renderChannel(d)}
+if(sec==='categoryPerf'){showLoad('#categoryPerfTable');const filters=reqFilters('categoryPerf');filters.product=S.categoryPerf.product;const d=await api('/api/query/category-performance',{method:'POST',body:JSON.stringify({periods:periodsFor('categoryPerf'),filters})});renderCategoryPerf(d)}
 if(sec==='target'){showLoad('#targetTable');const d=await api('/api/query/target',{method:'POST',body:JSON.stringify({period:S.target.period,filters:reqFilters('target'),daysTotalBestEstimate:S.target.bestEstDays})});renderTarget(d)}
 if(sec==='categoryTarget'){showLoad('#categoryTargetTable');const d=await api('/api/query/target-category',{method:'POST',body:JSON.stringify({period:S.categoryTarget.period,filters:reqFilters('categoryTarget'),daysTotalBestEstimate:S.categoryTarget.bestEstDays})});renderTargetCategory(d)}
 if(sec==='store'){showLoad('#storeTable');const filters=reqFilters('store');filters.product=S.store.product;const d=await api('/api/query/store',{method:'POST',body:JSON.stringify({periods:periodsFor('store'),filters,metricMode:S.store.metricMode})});renderStore(d)}
@@ -601,11 +615,45 @@ if(sec==='brand'){showLoad('#brandTable');const d=await api('/api/query/brand',{
 if(sec==='item'){showLoad('#itemTable');const filters=reqFilters('item');filters.product=S.item.product;const d=await api('/api/query/items',{method:'POST',body:JSON.stringify({periods:periodsFor('item'),filters,topN:S.item.topN,metricMode:S.item.metricMode})});renderItems(d)}
 if(sec==='daily'){showLoad('#dailyTable');const filters=reqFilters('daily');filters.product=S.daily.product;const d=await api('/api/query/daily-trend',{method:'POST',body:JSON.stringify({period:S.daily.period,filters,metricMode:S.daily.metricMode})});renderDailyTrend(d)}
 if(sec==='itemSales'){showLoad('#itemSalesTable');const filters=reqFilters('itemSales');filters.product=S.itemSales.product;const d=await api('/api/query/item-sales',{method:'POST',body:JSON.stringify({periods:periodsFor('itemSales'),filters,topN:S.itemSales.topN,metricMode:S.itemSales.metricMode})});renderItemSales(d)}
-}catch(e){const id={channel:'#channelTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+}catch(e){const id={channel:'#channelTable',categoryPerf:'#categoryPerfTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
 
 function groupHead(name,p,cls){return `<th colspan="3" class="${cls}">${name}<span class="period-sub">${rangeLabel(p)}</span></th>`}
+
+// V66 Section 3: same table format as Channel Performance, rows = category.
+function renderCategoryPerf(d){
+  const ps=periodsFor('categoryPerf'),n=ps.length;
+  const hasP1=n>=2,hasP2=n>=3;
+  const gcell=v=>`<td class="num ${v>=0?'pos':'neg'}">${fp(v)}</td>`;
+  let h=`<table class="sortable-table chart-table" data-chart-label="0"><thead><tr><th rowspan="2">CATEGORY</th>${groupHead('CURRENT',ps[0],'group-current')}${hasP1?groupHead('PREVIOUS 1',ps[1],'group-prev1'):''}${hasP2?groupHead('PREVIOUS 2',ps[2],'group-prev2'):''}${hasP1?'<th colspan="3" class="group-growth">GROWTH vs P1</th>':''}${hasP2?'<th colspan="3" class="group-growth">GROWTH vs P2</th>':''}</tr><tr>${ps.map(()=>'<th>Sales</th><th>Trx</th><th>Basket Size</th>').join('')}${hasP1?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}${hasP2?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}</tr></thead><tbody>`;
+  for(const r of d.rows){
+    h+=`<tr><td>${esc(r.category)}</td>${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?gcell(r.growthP1?.sales)+gcell(r.growthP1?.trx)+gcell(r.growthP1?.basket):''}${hasP2?gcell(r.growthP2?.sales)+gcell(r.growthP2?.trx)+gcell(r.growthP2?.basket):''}</tr>`;
+  }
+  const tg=i=>({sales:growthPct(d.total[0].sales,d.total[i].sales),trx:growthPct(d.total[0].trx,d.total[i].trx),basket:growthPct(d.total[0].basket,d.total[i].basket)});
+  const tg1=hasP1?tg(1):null,tg2=hasP2?tg(2):null;
+  h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td>${d.total.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?`<td class="num">${fp(tg1.sales)}</td><td class="num">${fp(tg1.trx)}</td><td class="num">${fp(tg1.basket)}</td>`:''}${hasP2?`<td class="num">${fp(tg2.sales)}</td><td class="num">${fp(tg2.trx)}</td><td class="num">${fp(tg2.basket)}</td>`:''}</tr>`;
+  const growthColspan=(hasP1?3:0)+(hasP2?3:0);
+  if(hasP1){
+    let vv='<tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td>';
+    let vp='<tr class="no-sort-row"><td class="summary-blue">Variance %</td>';
+    for(let i=0;i<n;i++){
+      const v=d.variance[i];
+      if(v){
+        vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;
+        vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`;
+      }else{vv+='<td></td><td></td><td></td>';vp+='<td></td><td></td><td></td>'}
+    }
+    h+=vv+(growthColspan?`<td colspan="${growthColspan}"></td>`:'')+'</tr>';
+    h+=vp+(growthColspan?`<td colspan="${growthColspan}"></td>`:'')+'</tr>';
+  }
+  h+='</tbody></table>';
+  $('#categoryPerfTable').innerHTML=h;
+  const t=$('#categoryPerfTable table');
+  const cols=[1];if(hasP1)cols.push(4);if(hasP2)cols.push(7);
+  t.dataset.chartCols=cols.join(',');
+  enhanceTable(t);
+}
 
 function renderChannel(d){
   const ps=periodsFor('channel'),n=ps.length;
@@ -1517,6 +1565,7 @@ async function refreshUpdateHeader(){
 
 const SECTION_STATE_MAP={
   channelSection:'channel',
+  categoryPerfSection:'categoryPerf',
   targetSection:'target',
   categoryTargetSection:'categoryTarget',
   storeSection:'store',
@@ -1603,7 +1652,7 @@ async function boot(){
   renderFilters();
   setupSectionVisibility();
 
-  for(const sec of ['channel','target','categoryTarget','store','brand','item','daily','itemSales']){
+  for(const sec of ['channel','target','categoryPerf','categoryTarget','store','brand','item','daily','itemSales']){
     const sectionId=Object.keys(SECTION_STATE_MAP).find(k=>SECTION_STATE_MAP[k]===sec);
     if(sectionId && isSectionHiddenByPreference(sectionId))continue;
     await loadSection(sec);
