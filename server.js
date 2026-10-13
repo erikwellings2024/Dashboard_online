@@ -490,7 +490,7 @@ function mergeMetaRows(target,rows){
     if(r.rawCategory) rawCategories.add(String(r.rawCategory).trim().toUpperCase());
     else if(r.category) rawCategories.add(String(r.category).trim().toUpperCase());
     if(r.salesType) salesTypes.add(r.salesType);
-    if(r.customerType && r.customerType!=='UNSPECIFIED') customerTypes.add(r.customerType);
+    if(r.customerType) customerTypes.add(r.customerType);
 
     const sku=String(r.newItemCode||r.sku||'').trim();
     const itemName=String(r.itemName||'').trim();
@@ -3023,7 +3023,7 @@ app.get('/api/meta', requireAuth, (req,res)=>{
     categorySort:config.categorySort||{},
     brands:metaIndex.brands||[],
     salesTypes:metaIndex.salesTypes||[],
-    customerTypes:metaIndex.customerTypes||[],
+    customerTypes:[...new Set([...(metaIndex.customerTypes||[]),'UNSPECIFIED'])],
     rankingDefault:config.rankingDefault,
     runtime:{...(runtime||{}),rowCount:totals.rowCount,minDate:totals.minDate,maxDate:totals.maxDate},
     uploadPolicy:uploadPolicy(),
@@ -3905,4 +3905,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sales_gross (Metabase New) / sub_total_inv (Old & Excel) | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | V65 Metabase New (sales_gross) + bulk refresh: enabled | V66 Category Performance: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sales_gross (Metabase New) / sub_total_inv (Old & Excel) | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | V65 Metabase New (sales_gross) + bulk refresh: enabled | V66 Category Performance: enabled | V67 All-filter fix: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
