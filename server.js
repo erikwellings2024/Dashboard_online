@@ -3073,6 +3073,61 @@ app.post('/api/query/channel', requireAuth, async (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
+// V66 Category Performance (Section 3): same layout as Channel Performance but
+// rows = mapped categories. Streams month by month (only aggregates in memory).
+async function categoryPerformanceQuery(periods,filters){
+  const P=periods.length;
+  const agg=()=>({sales:0,qty:0,inv:new Set()});
+  const cats=new Map(),total=Array.from({length:P},agg);
+  const keys=[...new Set(periods.flatMap(p=>monthKeysInRange(p.start,p.end)))].filter(monthAllowed).sort();
+  for(const key of keys){
+    let monthRows=await readMonthRows(key);
+    if(!Array.isArray(monthRows)||!monthRows.length)continue;
+    for(const r of monthRows)decorateStoredRow(r);
+    const rows=filterBase(monthRows,filters||{});monthRows=null;
+    for(const r of rows){
+      for(let pi=0;pi<P;pi++){
+        if(!rowInPeriod(r,periods[pi]))continue;
+        const c=r.category||'OTHER';
+        let a=cats.get(c);if(!a){a=Array.from({length:P},agg);cats.set(c,a)}
+        const v=safeNum(r.sales),q=safeNum(r.qty);
+        a[pi].sales+=v;a[pi].qty+=q;if(r.invoice)a[pi].inv.add(r.invoice);
+        total[pi].sales+=v;total[pi].qty+=q;if(r.invoice)total[pi].inv.add(r.invoice);
+      }
+    }
+    if(typeof global.gc==='function'&&process.memoryUsage().rss/1048576>200)global.gc();
+  }
+  const out=a=>{const trx=a.inv.size;return {sales:a.sales,trx,basket:trx?a.sales/trx:0,qty:a.qty}};
+  const order=mappedCategoryList();
+  const wanted=new Set(arr(filters?.categories).map(x=>String(x).toUpperCase()));
+  const names=[...new Set([...order.filter(c=>!wanted.size||wanted.has(c)),...cats.keys()])]
+    .sort((a,b)=>(Number(config.categorySort?.[a]??9999)-Number(config.categorySort?.[b]??9999))||a.localeCompare(b));
+  const rows=names.map(c=>{
+    const m=(cats.get(c)||Array.from({length:P},agg)).map(out);
+    const cur=m[0],p1=m[1]||null,p2=m[2]||null;
+    return {category:c,periods:m,
+      growthP1:p1?{sales:diffPct(cur.sales,p1.sales),trx:diffPct(cur.trx,p1.trx),basket:diffPct(cur.basket,p1.basket)}:null,
+      growthP2:p2?{sales:diffPct(cur.sales,p2.sales),trx:diffPct(cur.trx,p2.trx),basket:diffPct(cur.basket,p2.basket)}:null};
+  });
+  const tot=total.map(out);
+  const variance=periods.map((_,i)=>{
+    if(i===P-1)return null;
+    const a=tot[i],b=tot[i+1];
+    return {sales:a.sales-b.sales,trx:a.trx-b.trx,basket:a.basket-b.basket,salesPct:diffPct(a.sales,b.sales),trxPct:diffPct(a.trx,b.trx),basketPct:diffPct(a.basket,b.basket)};
+  });
+  return {rows,total:tot,variance};
+}
+
+app.post('/api/query/category-performance', requireAuth, async (req,res)=>{
+  try{
+    const result=await runHeavyQuery('category-performance',req.body,async()=>{
+      const periods=normalizePeriods(req.body.periods);
+      return categoryPerformanceQuery(periods,req.body.filters||{});
+    });
+    res.json(result);
+  }catch(e){res.status(400).json({error:e.message})}
+});
+
 app.post('/api/query/target', requireAuth, async (req,res)=>{
   try {
     const result=await runHeavyQuery('target',req.body,async()=>{
@@ -3850,4 +3905,4 @@ app.use((err,req,res,next)=>{
   res.status(500).json({error:'SERVER_ERROR'});
 });
 
-bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sales_gross (Metabase New) / sub_total_inv (Old & Excel) | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | V65 Metabase New (sales_gross) + bulk refresh: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
+bootstrap().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`Sales dashboard running on http://0.0.0.0:${PORT} | Max upload: ${MAX_UPLOAD_MB} MB | Streaming XLSX: enabled | Sales measure: sales_gross (Metabase New) / sub_total_inv (Old & Excel) | SKU: new_item_code | ZIP descriptor compatibility: enabled | Manual BE days: enabled | Customer Type + Store Stat: enabled | Memory-safe monthly queries: enabled | Category Target + Qty mode: enabled | GZIP monthly storage: enabled | Category online/offline: enabled | Query queue/cache: low-memory | Railway Free memory guard: enabled | V52 lazy Excel libs + idle GC: enabled | V53 history from 2025-01: enabled | V54 Online Report: enabled | V55 Online Grafik per Channel: enabled | V56 Halodoc Rejection: enabled | V57 Rejection Excel import: enabled | V62 Metabase chunked sync: enabled | V65 Metabase New (sales_gross) + bulk refresh: enabled | V66 Category Performance: enabled | Metabase Manual Sync CSV-stream-urlencoded: enabled | Metabase session reuse: encrypted persistent | Daily Trend + Top Items Sales: enabled | Detail Trx & BS V50 summary/report: enabled | Unit Code fallback: enabled | Scheduler: disabled | Manual RUN NOW + manual month refresh: enabled | Monthly closing: disabled`)));
