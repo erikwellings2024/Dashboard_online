@@ -603,7 +603,18 @@ function setupRange(f){
 }
 
 function periodsFor(sec){const x=S[sec];return x.periods.slice(0,1+x.prevCount)}
-function reqFilters(sec){return clone(S[sec].filters)}
+// V67: a filter with every option ticked means "no filter". Sending the full
+// list would silently drop rows whose value is not in the list (unmapped store,
+// empty customer type, ...), so "All" would no longer mean all.
+function compactFilters(f,meta){
+  const out={...f};
+  const opts={stores:(meta.stores||[]).map(s=>typeof s==='string'?s:s.name),channels:meta.channels||[],categories:meta.categories||[],brands:meta.brands||[],salesTypes:meta.salesTypes||[],customerTypes:meta.customerTypes||[],storeStats:meta.storeStats||[]};
+  for(const k of Object.keys(opts)){
+    if(Array.isArray(out[k])&&opts[k].length&&opts[k].every(v=>out[k].includes(v)))delete out[k];
+  }
+  return out;
+}
+function reqFilters(sec){return compactFilters(clone(S[sec].filters),META)}
 
 async function loadSection(sec){try{
 if(sec==='channel'){showLoad('#channelTable');const filters=reqFilters('channel');filters.product=S.channel.product;const d=await api('/api/query/channel',{method:'POST',body:JSON.stringify({periods:periodsFor('channel'),filters})});renderChannel(d)}

@@ -299,7 +299,18 @@ function renderBasketTable(){
   validateBands(true);
 }
 
-function reqFilters(){const f=clone(S.filters);f.product=S.product;return f}
+// V67: a filter with every option ticked means "no filter". Sending the full
+// list would silently drop rows whose value is not in the list (unmapped store,
+// empty customer type, ...), so "All" would no longer mean all.
+function compactFilters(f,meta){
+  const out={...f};
+  const opts={stores:(meta.stores||[]).map(s=>typeof s==='string'?s:s.name),channels:meta.channels||[],categories:meta.categories||[],brands:meta.brands||[],salesTypes:meta.salesTypes||[],customerTypes:meta.customerTypes||[],storeStats:meta.storeStats||[]};
+  for(const k of Object.keys(opts)){
+    if(Array.isArray(out[k])&&opts[k].length&&opts[k].every(v=>out[k].includes(v)))delete out[k];
+  }
+  return out;
+}
+function reqFilters(){const f=compactFilters(clone(S.filters),META);f.product=S.product;return f}
 async function loadBasket(){
   readBandInputs();const check=validateBands(true);if(!check.ok)return;
   const btn=$('#applyBasket');if(btn){btn.disabled=true;btn.textContent='LOADING...'}

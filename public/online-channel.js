@@ -12,6 +12,17 @@
   const title=s=>String(s).toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 
   let META=null,R=null;
+  // V67: a filter with every option ticked means "no filter". Sending the full
+  // list would silently drop rows whose value is not in the list (unmapped store,
+  // empty customer type, ...), so "All" would no longer mean all.
+  function compactFilters(f,meta){
+    const out={...f};
+    const opts={stores:(meta.stores||[]).map(s=>typeof s==='string'?s:s.name),channels:meta.channels||[],categories:meta.categories||[],brands:meta.brands||[],salesTypes:meta.salesTypes||[],customerTypes:meta.customerTypes||[],storeStats:meta.storeStats||[]};
+    for(const k of Object.keys(opts)){
+      if(Array.isArray(out[k])&&opts[k].length&&opts[k].every(v=>out[k].includes(v)))delete out[k];
+    }
+    return out;
+  }
   const S={start:'',end:'',chartFrom:'',chartTo:'',channels:[],topN:5,filters:{}};
 
   function colorFor(ch,i){return COLORS[ch]||SPARE[i%SPARE.length]}
@@ -85,7 +96,7 @@
     const btn=$('#applyChannelGraph');btn.disabled=true;btn.textContent='LOADING...';
     $('#channelGraphBody').innerHTML='<div class="loading">Calculating per channel...</div>';
     try{
-      R=await api('/api/query/online-channel',{method:'POST',body:JSON.stringify({period:{start:S.start,end:S.end},chartFrom:S.chartFrom,chartTo:S.chartTo,channels:S.channels,topN:S.topN,filters:S.filters})});
+      R=await api('/api/query/online-channel',{method:'POST',body:JSON.stringify({period:{start:S.start,end:S.end},chartFrom:S.chartFrom,chartTo:S.chartTo,channels:S.channels,topN:S.topN,filters:compactFilters(S.filters,META)})});
       render();renderBody();
     }catch(e){R=null;render();$('#channelGraphBody').innerHTML=`<div class="error">Gagal menghitung: ${esc(e.message)}</div>`}
   }

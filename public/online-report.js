@@ -12,6 +12,17 @@
   const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||r.statusText);return d};
 
   let META=null,R=null;
+  // V67: a filter with every option ticked means "no filter". Sending the full
+  // list would silently drop rows whose value is not in the list (unmapped store,
+  // empty customer type, ...), so "All" would no longer mean all.
+  function compactFilters(f,meta){
+    const out={...f};
+    const opts={stores:(meta.stores||[]).map(s=>typeof s==='string'?s:s.name),channels:meta.channels||[],categories:meta.categories||[],brands:meta.brands||[],salesTypes:meta.salesTypes||[],customerTypes:meta.customerTypes||[],storeStats:meta.storeStats||[]};
+    for(const k of Object.keys(opts)){
+      if(Array.isArray(out[k])&&opts[k].length&&opts[k].every(v=>out[k].includes(v)))delete out[k];
+    }
+    return out;
+  }
   const S={start:'',end:'',chartFrom:'',chartTo:'',online:[],offline:[],filters:{}};
 
   function periodLabel(p){
@@ -93,7 +104,7 @@
     const btn=$('#applyOnline');btn.disabled=true;btn.textContent='LOADING...';
     $('#onlineTable').innerHTML='<div class="loading">Calculating Online Report...</div>';
     try{
-      R=await api('/api/query/online-report',{method:'POST',body:JSON.stringify({period:{start:S.start,end:S.end},chartFrom:S.chartFrom,chartTo:S.chartTo,onlineChannels:S.online,offlineChannels:S.offline,filters:S.filters})});
+      R=await api('/api/query/online-report',{method:'POST',body:JSON.stringify({period:{start:S.start,end:S.end},chartFrom:S.chartFrom,chartTo:S.chartTo,onlineChannels:S.online,offlineChannels:S.offline,filters:compactFilters(S.filters,META)})});
       render();renderTable();
     }catch(e){R=null;render();$('#onlineTable').innerHTML=`<div class="error">Gagal menghitung: ${esc(e.message)}</div>`}
   }
