@@ -707,9 +707,11 @@ async function downloadRawData(format){
     const blob=await r.blob();
     clearInterval(poll);
     const total=Number(r.headers.get('X-Raw-Rows')||0);
-    const cd=r.headers.get('Content-Disposition')||'';
-    const m=cd.match(/filename="?([^";]+)"?/);
-    const name=m?m[1]:`Raw_Data_${S.raw.month}.${format}`;
+    // V70: add local download date + time (HH-MM) so files never overwrite each other.
+    // ':' is not allowed in Windows file names, so '-' is used between hour and minute.
+    const now=new Date();
+    const stamp=`${localISO(now)}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}`;
+    const name=`Raw_Data_${S.raw.month}_${stamp}.${format}`;
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),5000);
