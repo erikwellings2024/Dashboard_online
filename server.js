@@ -3548,6 +3548,160 @@ app.post('/api/query/daily-trend', requireAuth, async (req,res)=>{
 });
 
 
+// ===================== V68: Section 10 — Raw Data Export =====================
+// Filters allowed for raw export (as requested): Channel, Store, Category,
+// Brand, Sales Type, Customer Type. One month per request.
+const RAW_EXPORT_FILTER_KEYS=['channels','stores','categories','brands','salesTypes','customerTypes'];
+const RAW_EXPORT_EXCEL_MAX_ROWS=1048575; // Excel sheet limit minus header row
+const RAW_EXPORT_COLUMNS=[
+  {header:'Transaction Date',key:'date',width:14},
+  {header:'Invoice No',key:'invoice',width:22},
+  {header:'Store',key:'store',width:26},
+  {header:'PT',key:'pt',width:8},
+  {header:'Store Stat',key:'storeStat',width:14},
+  {header:'Channel',key:'channel',width:18},
+  {header:'SKU (New Item Code)',key:'sku',width:18},
+  {header:'Item Name',key:'itemName',width:42},
+  {header:'Unit Code',key:'unitCode',width:10},
+  {header:'Brand',key:'brand',width:20},
+  {header:'Category',key:'category',width:20},
+  {header:'Category (Raw)',key:'rawCategory',width:20},
+  {header:'Sales Type',key:'salesType',width:14},
+  {header:'Customer Type',key:'customerType',width:16},
+  {header:'Qty',key:'qty',width:10,numFmt:'#,##0.##'},
+  {header:'Sales',key:'sales',width:16,numFmt:'#,##0'}
+];
+
+function rawExportMonth(input){
+  const month=String(input||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(month) || !monthAllowed(month)) throw new Error('MONTH_INVALID');
+  const days=daysInMonth(`${month}-01`);
+  return {month,period:{start:`${month}-01`,end:`${month}-${String(days).padStart(2,'0')}`}};
+}
+
+function rawExportFilters(input){
+  const f=input||{};
+  const out={};
+  for(const k of RAW_EXPORT_FILTER_KEYS) if(Array.isArray(f[k])) out[k]=f[k];
+  return out;
+}
+
+function rawExportRecord(r){
+  return {
+    date:r.date||'',
+    invoice:r.invoice||'',
+    store:r.store||'',
+    pt:r.pt||'',
+    storeStat:effectiveStoreStatus(r),
+    channel:r.channel||'',
+    sku:r.newItemCode||r.sku||'',
+    itemName:r.itemName||'',
+    unitCode:r.unitCode||'',
+    brand:r.brand||'',
+    category:effectiveCategory(r),
+    rawCategory:r.rawCategory||'',
+    salesType:r.salesType||'',
+    customerType:r.customerType||'UNSPECIFIED',
+    qty:safeNum(r.qty),
+    sales:safeNum(r.sales)
+  };
+}
+
+async function rawExportRows(body){
+  const {month,period}=rawExportMonth(body.month);
+  const rows=await readRowsForPeriods([period]);
+  const filtered=filterBase(rows,rawExportFilters(body.filters)).filter(r=>rowInPeriod(r,period));
+  filtered.sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.invoice).localeCompare(String(b.invoice)));
+  return {month,period,rows:filtered};
+}
+
+// Progress tracking for raw export (tiny in-memory map, no file stored).
+const rawExportJobs=new Map();
+function rawJobId(v){return String(v||'').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,64)}
+function setRawJob(id,patch){
+  if(!id)return;
+  const now=Date.now();
+  for(const [k,v] of rawExportJobs) if(now-v.at>10*60*1000) rawExportJobs.delete(k);
+  rawExportJobs.set(id,{...(rawExportJobs.get(id)||{}),...patch,at:now});
+}
+
+app.get('/api/export/raw-progress', requireAuth, (req,res)=>{
+  noStoreApiResponse(res);
+  const job=rawExportJobs.get(rawJobId(req.query.id));
+  res.json(job?{stage:job.stage,done:job.done||0,total:job.total||0,error:job.error||null}:{stage:'unknown',done:0,total:0});
+});
+
+function csvCell(v){
+  if(v===null||v===undefined)return '';
+  const s=String(v);
+  return /[",\r\n;]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;
+}
+
+const yieldLoop=()=>new Promise(r=>setImmediate(r));
+
+app.post('/api/export/raw-data', requireAuth, async (req,res)=>{
+  const format=String(req.body?.format||'xlsx').toLowerCase()==='csv'?'csv':'xlsx';
+  const jobId=rawJobId(req.body?.jobId);
+  let aborted=false;
+  res.on('close',()=>{ if(!res.writableFinished) aborted=true; });
+  setRawJob(jobId,{stage:'queued',done:0,total:0});
+  try{
+    await withHeavyQuerySlot(async()=>{
+      if(aborted) throw new Error('CANCELLED');
+      setRawJob(jobId,{stage:'reading'});
+      let {month,rows}=await rawExportRows(req.body||{});
+      if(aborted) throw new Error('CANCELLED');
+      if(!rows.length) throw new Error('Tidak ada data untuk bulan & filter yang dipilih.');
+      if(format==='xlsx' && rows.length>RAW_EXPORT_EXCEL_MAX_ROWS){
+        throw new Error(`Data ${rows.length.toLocaleString('en-US')} baris melebihi batas Excel. Silakan pakai Download CSV atau persempit filter.`);
+      }
+      const total=rows.length;
+      setRawJob(jobId,{stage:'writing',done:0,total});
+      res.setHeader('Content-Disposition',`attachment; filename="Raw_Data_${month}.${format}"`);
+      res.setHeader('Cache-Control','no-store');
+      res.setHeader('X-Raw-Rows',String(total));
+
+      if(format==='csv'){
+        res.setHeader('Content-Type','text/csv; charset=utf-8');
+        res.write('\uFEFF'+RAW_EXPORT_COLUMNS.map(c=>csvCell(c.header)).join(',')+'\r\n');
+        let buf='';
+        for(let i=0;i<total;i++){
+          const rec=rawExportRecord(rows[i]);
+          buf+=RAW_EXPORT_COLUMNS.map(c=>csvCell(rec[c.key])).join(',')+'\r\n';
+          rows[i]=null;
+          if(buf.length>256*1024){ if(!res.write(buf)) await new Promise(r=>res.once('drain',r)); buf=''; }
+          if(i%2000===0){ setRawJob(jobId,{done:i}); await yieldLoop(); if(aborted) break; }
+        }
+        if(!aborted){ if(buf) res.write(buf); res.end(); }
+      }else{
+        res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        // Streaming writer: rows go straight to the browser; nothing is saved on the server.
+        const wb=new (getExcelJS()).stream.xlsx.WorkbookWriter({stream:res,useStyles:true,useSharedStrings:false});
+        const ws=wb.addWorksheet('Raw Data',{views:[{state:'frozen',ySplit:1}]});
+        ws.columns=RAW_EXPORT_COLUMNS.map(c=>({header:c.header,key:c.key,width:c.width,style:c.numFmt?{numFmt:c.numFmt}:{}}));
+        ws.getRow(1).font={bold:true};
+        ws.getRow(1).commit();
+        for(let i=0;i<total;i++){
+          ws.addRow(rawExportRecord(rows[i])).commit();
+          rows[i]=null;
+          if(i%2000===0){ setRawJob(jobId,{done:i}); await yieldLoop(); if(aborted) break; }
+        }
+        if(!aborted){ ws.commit(); await wb.commit(); }
+      }
+      rows=null;
+      if(aborted){ setRawJob(jobId,{stage:'cancelled'}); res.destroy(); }
+      else setRawJob(jobId,{stage:'done',done:total});
+      if(typeof global.gc==='function') global.gc();
+    });
+  }catch(e){
+    const msg=e.message==='CANCELLED'?'Dibatalkan':e.message;
+    setRawJob(jobId,{stage:e.message==='CANCELLED'?'cancelled':'error',error:msg});
+    if(!res.headersSent && !aborted){ res.removeHeader('Content-Disposition'); res.status(400).json({error:msg}); }
+    else { if(!aborted) console.error('[RAW_EXPORT] failed mid-stream:',e.message); res.destroy(); }
+  }
+});
+// =================== end V68 Section 10 ===================
+
 function noStoreApiResponse(res){
   res.set({
     'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate',
