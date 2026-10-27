@@ -1902,3 +1902,17 @@ body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100
 .sync-source-option small{font-size:11px;color:#667085;margin-top:2px}
 .sync-source-option:has(input:checked){border-color:#4d9a63;background:#f1f8f3}
 #autoSyncBulkRange select{min-width:160px}
+
+/* V69: Section 10 Raw Data Export (no preview, progress bar) */
+.raw-month-select{min-width:150px}
+.raw-dl-btn{background:#2f6ca2!important}
+.raw-dl-btn:disabled{opacity:.5;cursor:not-allowed}
+.raw-progress{padding:10px 2px 4px}
+.raw-progress-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:12px;color:#25303b}
+.raw-progress-track{height:14px;background:#e6eaee;border-radius:7px;overflow:hidden;position:relative}
+.raw-progress-bar{height:100%;width:0;background:#2f8f5b;border-radius:7px;transition:width .3s}
+.raw-progress.indeterminate .raw-progress-bar{width:30%!important;position:absolute;animation:rawSlide 1.2s ease-in-out infinite}
+@keyframes rawSlide{0%{left:-30%}100%{left:100%}}
+.raw-progress.error .raw-progress-text{color:#b73e39;font-weight:700}
+.raw-progress.error .raw-progress-bar{background:#b73e39;width:100%!important}
+.raw-progress.done .raw-progress-text{color:#167044;font-weight:700}

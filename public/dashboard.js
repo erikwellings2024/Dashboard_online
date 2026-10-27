@@ -65,6 +65,27 @@ function defaultPeriods(){
 }
 function all(arr,key){return arr.map(x=>key?x[key]:x)}
 
+// V68: Section 10 — Raw Data Export helpers
+function rawMonthOptions(){
+  const slots=(META.monthSlots||[]).filter(m=>Number(m.rowCount||0)>0).map(m=>m.month);
+  if(!slots.length && META.maxDate) slots.push(META.maxDate.slice(0,7));
+  return [...new Set(slots)].sort().reverse();
+}
+function defaultRawMonth(){
+  const opts=rawMonthOptions();
+  const latest=META.maxDate?META.maxDate.slice(0,7):'';
+  return opts.includes(latest)?latest:(opts[0]||latest);
+}
+function rawMonthLabel(m){
+  const [y,mm]=String(m).split('-').map(Number);
+  if(!y||!mm)return m;
+  return new Date(y,mm-1,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+}
+function rawMonthControl(val){
+  const opts=rawMonthOptions();
+  return `<div class="field"><label>Bulan</label><select class="control raw-month-select">${opts.map(m=>`<option value="${esc(m)}" ${m===val?'selected':''}>${esc(rawMonthLabel(m))}</option>`).join('')}</select></div>`;
+}
+
 function initState(){const p=defaultPeriods();const common={
 stores:all(META.stores,'name'),
 categories:clone(META.categories),
@@ -82,6 +103,7 @@ S.store={periods:clone(p),prevCount:2,metricMode:'value',product:'',productLabel
 S.brand={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.item={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 S.daily={period:clone(p[0]),metricMode:'value',product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
+S.raw={month:defaultRawMonth(),filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes)}};
 S.itemSales={periods:clone(p),prevCount:2,metricMode:'value',topN:Math.min(10,META.rankingDefault||10),product:'',productLabel:'',filters:{channels:clone(common.channels),stores:clone(common.stores),categories:clone(common.categories),brands:clone(common.brands),salesTypes:clone(common.salesTypes),customerTypes:clone(common.customerTypes),storeStats:clone(common.storeStats)}};
 }
 
@@ -230,6 +252,15 @@ function activeFilterChips(section){
     chips+=activeProductChip(s);
   }
 
+  if(section==='raw'){
+    chips+=activeMultiChip('Channel',s.filters.channels,META.channels);
+    chips+=activeMultiChip('Store',s.filters.stores,META.stores);
+    chips+=activeMultiChip('Category',s.filters.categories,META.categories);
+    chips+=activeMultiChip('Brand',s.filters.brands,META.brands);
+    chips+=activeMultiChip('Sales Type',s.filters.salesTypes,META.salesTypes);
+    chips+=activeMultiChip('Customer Type',s.filters.customerTypes,META.customerTypes||[]);
+  }
+
   return chips;
 }
 
@@ -263,8 +294,13 @@ function renderFilters(){
   const is=S.itemSales;
   $('#itemSalesFilters').innerHTML=`<div class="filter-grid">${rangeControl('itemSales','p0','Current',is.periods[0])}${previous1Control('itemSales',is.periods[1],is.prevCount>=1)}${previous2Control('itemSales',is.periods[2],is.prevCount===2)}${multiControl('itemSales','channels','Channel',META.channels,is.filters.channels,true)}${multiControl('itemSales','stores','Store',META.stores,is.filters.stores,true)}${multiControl('itemSales','categories','Category',META.categories,is.filters.categories,true)}${multiControl('itemSales','brands','Brand',META.brands,is.filters.brands,true)}${multiControl('itemSales','salesTypes','Sales Type',META.salesTypes,is.filters.salesTypes)}${multiControl('itemSales','customerTypes','Customer Type',META.customerTypes||[],is.filters.customerTypes)}${multiControl('itemSales','storeStats','Store Stat',META.storeStats||[],is.filters.storeStats)}${selectControl('itemSales','topN','Show Top',[1,2,3,4,5,6,7,8,9,10,15,20,25],is.topN)}${productPicker('itemSales','Item (SKU / Name)')}<button class="apply" data-apply="itemSales">APPLY</button></div><div class="chips"><span class="chip"><b>Section 9 only</b></span>${activeFilterChips('itemSales')}</div>`;
 
+  const rw=S.raw;
+  $('#rawFilters').innerHTML=`<div class="filter-grid">${rawMonthControl(rw.month)}${multiControl('raw','channels','Channel',META.channels,rw.filters.channels,true)}${multiControl('raw','stores','Store',META.stores,rw.filters.stores,true)}${multiControl('raw','categories','Category',META.categories,rw.filters.categories,true)}${multiControl('raw','brands','Brand',META.brands,rw.filters.brands,true)}${multiControl('raw','salesTypes','Sales Type',META.salesTypes,rw.filters.salesTypes)}${multiControl('raw','customerTypes','Customer Type',META.customerTypes||[],rw.filters.customerTypes)}<button class="apply raw-dl-btn" type="button" data-raw-format="xlsx">DOWNLOAD EXCEL</button><button class="apply raw-dl-btn" type="button" data-raw-format="csv">DOWNLOAD CSV</button></div><div class="chips"><span class="chip"><b>Section 10 only</b></span>${activeFilterChips('raw')}</div>`;
 
   bindFilters();
+  const rawSel=$('.raw-month-select');
+  if(rawSel)rawSel.onchange=()=>{S.raw.month=rawSel.value};
+  $$('[data-raw-format]').forEach(b=>{b.disabled=!!RAW_DL;b.onclick=()=>downloadRawData(b.dataset.rawFormat)});
 }
 
 function maybeLoadSection(sec){
@@ -629,6 +665,67 @@ if(sec==='itemSales'){showLoad('#itemSalesTable');const filters=reqFilters('item
 }catch(e){const id={channel:'#channelTable',categoryPerf:'#categoryPerfTable',target:'#targetTable',categoryTarget:'#categoryTargetTable',store:'#storeTable',brand:'#brandTable',item:'#itemTable',daily:'#dailyTable',itemSales:'#itemSalesTable'}[sec];if(id)$(id).innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 function showLoad(id){$(id).innerHTML='<div class="loading">Loading...</div>'}
+
+// V69: Section 10 — download with progress bar (no preview, nothing stored)
+let RAW_DL=null;
+const nfID=n=>Number(n||0).toLocaleString('id-ID');
+function rawProgress(state,text,pctVal){
+  const box=$('#rawProgress');if(!box)return;
+  box.classList.remove('hidden','indeterminate','error','done');
+  if(state)box.classList.add(state);
+  $('.raw-progress-text',box).textContent=text;
+  if(pctVal!==undefined)$('.raw-progress-bar',box).style.width=`${Math.max(0,Math.min(100,pctVal))}%`;
+  $('.raw-cancel',box).classList.toggle('hidden',state==='error'||state==='done');
+}
+function rawProgressHide(delay=0){setTimeout(()=>{if(!RAW_DL)$('#rawProgress')?.classList.add('hidden')},delay)}
+function rawSetBusy(busy){$$('[data-raw-format]').forEach(b=>b.disabled=busy)}
+function rawJobIdNew(){try{return crypto.randomUUID().replace(/-/g,'')}catch{return Date.now().toString(36)+Math.random().toString(36).slice(2)}}
+
+async function downloadRawData(format){
+  if(RAW_DL)return;
+  const jobId=rawJobIdNew();
+  const ctrl=new AbortController();
+  const label=rawMonthLabel(S.raw.month);
+  RAW_DL={jobId,ctrl};
+  rawSetBusy(true);
+  rawProgress('indeterminate',`Menyiapkan raw data ${label}...`,0);
+  const poll=setInterval(async()=>{
+    try{
+      const r=await fetch(`/api/export/raw-progress?id=${jobId}`,{cache:'no-store'});
+      if(!r.ok||!RAW_DL)return;
+      const j=await r.json();
+      if(j.stage==='queued')rawProgress('indeterminate','Menunggu antrean server...');
+      else if(j.stage==='reading')rawProgress('indeterminate',`Membaca data ${label}...`);
+      else if(j.stage==='writing'&&j.total){const p=j.done/j.total*100;rawProgress('',`Menyiapkan file: ${nfID(j.done)} / ${nfID(j.total)} baris (${Math.floor(p)}%)`,p)}
+    }catch{}
+  },700);
+  $('#rawProgress .raw-cancel').onclick=()=>ctrl.abort();
+  try{
+    const r=await fetch('/api/export/raw-data',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({month:S.raw.month,filters:reqFilters('raw'),format,jobId})});
+    if(r.status===401){location.href='/login.html';return}
+    if(!r.ok){let msg='Download gagal';try{msg=(await r.json()).error||msg}catch{}throw new Error(msg)}
+    const blob=await r.blob();
+    clearInterval(poll);
+    const total=Number(r.headers.get('X-Raw-Rows')||0);
+    const cd=r.headers.get('Content-Disposition')||'';
+    const m=cd.match(/filename="?([^";]+)"?/);
+    const name=m?m[1]:`Raw_Data_${S.raw.month}.${format}`;
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    rawProgress('done',`Selesai — ${name} (${nfID(total)} baris) sudah diunduh.`,100);
+    RAW_DL=null;rawProgressHide(5000);
+  }catch(e){
+    clearInterval(poll);
+    const cancelled=e.name==='AbortError';
+    rawProgress('error',cancelled?'Download dibatalkan.':e.message);
+    RAW_DL=null;rawProgressHide(cancelled?2500:8000);
+  }finally{
+    clearInterval(poll);
+    RAW_DL=null;
+    rawSetBusy(false);
+  }
+}
 
 function groupHead(name,p,cls){return `<th colspan="3" class="${cls}">${name}<span class="period-sub">${rangeLabel(p)}</span></th>`}
 
