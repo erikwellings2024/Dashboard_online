@@ -3568,7 +3568,7 @@ const RAW_EXPORT_COLUMNS=[
   {header:'Category (Raw)',key:'rawCategory',width:20},
   {header:'Sales Type',key:'salesType',width:14},
   {header:'Customer Type',key:'customerType',width:16},
-  {header:'Qty',key:'qty',width:10,numFmt:'#,##0.##'},
+  {header:'Qty',key:'qty',width:10,numFmt:'General'},
   {header:'Sales',key:'sales',width:16,numFmt:'#,##0'}
 ];
 
