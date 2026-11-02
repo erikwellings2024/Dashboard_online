@@ -1153,7 +1153,9 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
           customer_type:get('customer_type'),
           trader_check:get('trader_check'),
           sub_total:get('sub_total'),
-          sub_total_inv:get('sub_total_inv'),
+          // V66: XLSX downloaded manually from Metabase New has sales_gross.
+          // Use it as the sales measure (same rule as Metabase New sync).
+          sub_total_inv:(()=>{const g=headerMap.has('sales_gross')?get('sales_gross'):null;return (g!==null&&g!==undefined&&String(g).trim()!=='')?g:get('sub_total_inv')})(),
           qty:get('qty'),
           telemed_check:get('telemed_check'),
           TELEMED:get('TELEMED'),
@@ -1944,6 +1946,21 @@ function envText(name, fallback=''){
 // sales measure = sales_gross. "old" = previous Q364 with sub_total_inv.
 const METABASE_SOURCES=['new','old'];
 function normalizeMetabaseSource(v){return String(v||'').toLowerCase()==='old'?'old':'new'}
+// V66: optional extra headers per Metabase source, for servers behind Cloudflare.
+// METABASE_NEW_EXTRA_HEADER_NAME + METABASE_NEW_EXTRA_HEADER_VALUE -> one custom header (WAF skip rule).
+// METABASE_NEW_CF_ACCESS_CLIENT_ID + METABASE_NEW_CF_ACCESS_CLIENT_SECRET -> Cloudflare Access service token.
+// Old source uses the same names without "NEW_".
+function metabaseExtraHeaders(prefix){
+  const h={};
+  const name=envText(prefix+'EXTRA_HEADER_NAME'), value=envText(prefix+'EXTRA_HEADER_VALUE');
+  if(name&&value)h[name]=value;
+  const cid=envText(prefix+'CF_ACCESS_CLIENT_ID'), csec=envText(prefix+'CF_ACCESS_CLIENT_SECRET');
+  if(cid&&csec){h['CF-Access-Client-Id']=cid;h['CF-Access-Client-Secret']=csec;}
+  return h;
+}
+function isCloudflareBlock(txt){return /Just a moment|cf-chl|challenge-platform|Attention Required|cloudflare/i.test(String(txt||''))}
+function cloudflareHint(settings){return ` — diblokir Cloudflare di ${settings.label} (${settings.baseUrl}). Minta admin Metabase membuat pengecualian, lalu isi variabel ${settings.source==='new'?'METABASE_NEW_':'METABASE_'}EXTRA_HEADER_NAME/VALUE di Railway.`}
+
 function metabaseSettings(source='new'){
   const src=normalizeMetabaseSource(source);
   if(src==='old')return {
@@ -1954,6 +1971,8 @@ function metabaseSettings(source='new'){
     questionId:envText('METABASE_QUESTION_ID','364'),
     startParamId:envText('METABASE_START_PARAM_ID','686090f7-5f68-4cbf-bd75-b10ef09f4781'),
     endParamId:envText('METABASE_END_PARAM_ID','8d7c1ee3-44a3-45e3-b056-dfb1fc99ca76'),
+    extraHeaders:metabaseExtraHeaders('METABASE_'),
+    manualSession:envText('METABASE_SESSION_ID'),
     triggerSecret:envText('AUTO_SYNC_SECRET')
   };
   return {
@@ -1964,6 +1983,8 @@ function metabaseSettings(source='new'){
     questionId:envText('METABASE_NEW_QUESTION_ID','626'),
     startParamId:envText('METABASE_NEW_START_PARAM_ID','ecac4877-f35a-4239-ae98-b3b89a185db6'),
     endParamId:envText('METABASE_NEW_END_PARAM_ID','993fb0ee-57ab-42f8-9a06-8c582c36ed70'),
+    extraHeaders:metabaseExtraHeaders('METABASE_NEW_'),
+    manualSession:envText('METABASE_NEW_SESSION_ID'),
     triggerSecret:envText('AUTO_SYNC_SECRET')
   };
 }
@@ -1971,7 +1992,7 @@ function metabaseSettings(source='new'){
 function autoSyncConfigured(source='new'){
   const s=metabaseSettings(source);
   // V36: manual-only Metabase update from authenticated Admin RUN NOW.
-  return !!(s.baseUrl && s.username && s.password && s.questionId);
+  return !!(s.baseUrl && ((s.username && s.password) || s.manualSession) && s.questionId);
 }
 
 
@@ -2188,13 +2209,15 @@ async function loadMetabaseSession(settings){
 async function metabaseLogin(settings){
   const r=await fetch(`${settings.baseUrl}/api/session`,{
     method:'POST',
-    headers:{'Content-Type':'application/json','Accept':'application/json'},
+    headers:{...(settings.extraHeaders||{}),'Content-Type':'application/json','Accept':'application/json'},
     body:JSON.stringify({username:settings.username,password:settings.password}),
     signal:AbortSignal.timeout(60000)
   });
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,300);
-    const e=new Error(`METABASE_LOGIN_FAILED (${r.status})${txt?': '+txt:''}`);
+    const e=new Error(isCloudflareBlock(txt)
+      ? `METABASE_LOGIN_FAILED (${r.status})${cloudflareHint(settings)}`
+      : `METABASE_LOGIN_FAILED (${r.status})${txt?': '+txt:''}`);
     e.statusCode=r.status;
     throw e;
   }
@@ -2206,6 +2229,16 @@ async function metabaseLogin(settings){
 }
 
 async function getMetabaseSession(settings,{forceLogin=false}={}){
+  // V66: session copied manually from the browser cookie "metabase.SESSION"
+  // (Railway variable METABASE_NEW_SESSION_ID / METABASE_SESSION_ID). Skips /api/session login.
+  if(settings.manualSession){
+    if(forceLogin){
+      const name=settings.source==='new'?'METABASE_NEW_SESSION_ID':'METABASE_SESSION_ID';
+      throw new Error(`METABASE_SESSION_EXPIRED: session di variabel ${name} sudah kedaluwarsa/ditolak. Login ulang ${settings.label} di browser, salin cookie metabase.SESSION yang baru ke Railway.`);
+    }
+    console.log('[METABASE_SESSION] using manual session from Railway variable');
+    return {sessionId:settings.manualSession,authMode:'manual-session'};
+  }
   if(!forceLogin){
     const cached=await loadMetabaseSession(settings);
     if(cached?.sessionId){
@@ -2473,6 +2506,7 @@ async function openMetabaseCsv(settings,sessionId,startDate,endDate){
   const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/csv`,{
     method:'POST',
     headers:{
+      ...(settings.extraHeaders||{}),
       'X-Metabase-Session':sessionId,
       'Accept':'text/csv,application/csv,text/plain',
       'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'
@@ -2483,8 +2517,9 @@ async function openMetabaseCsv(settings,sessionId,startDate,endDate){
 
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,500);
-    const e=new Error(`METABASE_CSV_FAILED (${r.status}): ${readableHttpError(r.status,txt)}`);
+    const e=new Error(`METABASE_CSV_FAILED (${r.status}): ${readableHttpError(r.status,txt)}${isCloudflareBlock(txt)?cloudflareHint(settings):''}`);
     e.statusCode=r.status;
+    e.cloudflare=isCloudflareBlock(txt);
     throw e;
   }
   if(!r.body)throw new Error('METABASE_CSV_FAILED: empty response');
@@ -2561,6 +2596,7 @@ async function openMetabaseCsvWithSessionReuse(settings,startDate,endDate){
     return {response,authMode:auth.authMode};
   }catch(e){
     if(e.statusCode!==401 && e.statusCode!==403)throw e;
+    if(e.cloudflare)throw e; // blocked by Cloudflare, not an expired session
 
     console.warn(
       `[METABASE_SESSION] cached session rejected with HTTP ${e.statusCode}; logging in once to refresh`
@@ -2719,6 +2755,7 @@ async function downloadMetabaseXlsx(settings,sessionId,startDate,endDate,targetF
   const r=await fetch(`${settings.baseUrl}/api/card/${encodeURIComponent(settings.questionId)}/query/xlsx`,{
     method:'POST',
     headers:{
+      ...(settings.extraHeaders||{}),
       'X-Metabase-Session':sessionId,
       'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream',
       'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'
@@ -2729,7 +2766,7 @@ async function downloadMetabaseXlsx(settings,sessionId,startDate,endDate,targetF
 
   if(!r.ok){
     const txt=(await r.text().catch(()=>'' )).slice(0,500);
-    throw new Error(`METABASE_XLSX_FAILED (${r.status})${txt?': '+txt:''}`);
+    throw new Error(isCloudflareBlock(txt)?`METABASE_XLSX_FAILED (${r.status})${cloudflareHint(settings)}`:`METABASE_XLSX_FAILED (${r.status})${txt?': '+txt:''}`);
   }
   if(!r.body)throw new Error('METABASE_XLSX_FAILED: empty response');
 
