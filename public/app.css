@@ -1916,3 +1916,6 @@ body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100
 .raw-progress.error .raw-progress-text{color:#b73e39;font-weight:700}
 .raw-progress.error .raw-progress-bar{background:#b73e39;width:100%!important}
 .raw-progress.done .raw-progress-text{color:#167044;font-weight:700}
+
+/* Variance: merah jika minus, hijau jika naik */
+.var-val{background:#eef5fc!important;color:#25303b;font-weight:700}.var-pct{background:#dcebf8!important;color:#25303b;font-weight:700}.var-val.var-neg,.var-pct.var-neg{color:#c62828!important}.var-val.var-pos,.var-pct.var-pos{color:#1b7a3a!important}

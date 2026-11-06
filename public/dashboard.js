@@ -3,6 +3,7 @@ const S={};
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});if(r.status===401){location.href='/login.html';throw new Error('Unauthorized')}const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d};
 const fmt=n=>n===null||n===undefined||!Number.isFinite(Number(n))?'-':Math.round(Number(n)).toLocaleString('en-US');
+const vc=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))||Number(v)===0?'':(Number(v)<0?'var-neg':'var-pos');
 const fp=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'-':`${v>=0&&v!==0?'+':''}${(Number(v)*100).toFixed(1)}%`;
 const pct=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'-':`${(Number(v)*100).toFixed(1)}%`;
 // Calendar dates are date-only values. Never convert them through UTC/toISOString(),
@@ -750,8 +751,8 @@ function renderCategoryPerf(d){
     for(let i=0;i<n;i++){
       const v=d.variance[i];
       if(v){
-        vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;
-        vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`;
+        vv+=`<td class="var-val num ${vc(v.sales)}">${fmt(v.sales)}</td><td class="var-val num ${vc(v.trx)}">${fmt(v.trx)}</td><td class="var-val num ${vc(v.basket)}">${fmt(v.basket)}</td>`;
+        vp+=`<td class="var-pct num ${vc(v.salesPct)}">${fp(v.salesPct)}</td><td class="var-pct num ${vc(v.trxPct)}">${fp(v.trxPct)}</td><td class="var-pct num ${vc(v.basketPct)}">${fp(v.basketPct)}</td>`;
       }else{vv+='<td></td><td></td><td></td>';vp+='<td></td><td></td><td></td>'}
     }
     h+=vv+(growthColspan?`<td colspan="${growthColspan}"></td>`:'')+'</tr>';
@@ -798,8 +799,8 @@ function renderChannel(d){
     for(let i=0;i<n;i++){
       const v=d.variance[i];
       if(v){
-        vv+=`<td class="summary-pink num">${fmt(v.sales)}</td><td class="summary-pink num">${fmt(v.trx)}</td><td class="summary-blue num">${fmt(v.basket)}</td>`;
-        vp+=`<td class="summary-blue num">${fp(v.salesPct)}</td><td class="summary-blue num">${fp(v.trxPct)}</td><td class="summary-blue num">${fp(v.basketPct)}</td>`;
+        vv+=`<td class="var-val num ${vc(v.sales)}">${fmt(v.sales)}</td><td class="var-val num ${vc(v.trx)}">${fmt(v.trx)}</td><td class="var-val num ${vc(v.basket)}">${fmt(v.basket)}</td>`;
+        vp+=`<td class="var-pct num ${vc(v.salesPct)}">${fp(v.salesPct)}</td><td class="var-pct num ${vc(v.trxPct)}">${fp(v.trxPct)}</td><td class="var-pct num ${vc(v.basketPct)}">${fp(v.basketPct)}</td>`;
       }else{
         vv+='<td></td><td></td><td></td>';
         vp+='<td></td><td></td><td></td>';
@@ -841,7 +842,7 @@ function renderTarget(d){
   h+=`<tr class="total no-sort-row"><td>TOTAL SALES</td><td class="num">${fmt(d.total.actual)}</td><td class="num">${fmt(d.total.target)}</td><td class="num">${fmt(d.total.mtdTarget)}</td><td class="num">${pct(d.total.achieve)}</td><td class="num">${pct(d.total.achieveMtd)}</td><td class="num">${fmt(d.total.bestEst)}</td><td class="num">${pct(closingPct(d.total.bestEst,d.total.target))}</td></tr>
   <tr class="summary-orange no-sort-row"><td>TOTAL TELEMED</td><td class="num">${fmt(d.telemed.actual)}</td><td class="num">${fmt(d.telemed.target)}</td><td class="num">${fmt(d.telemed.mtdTarget)}</td><td></td><td></td><td class="num">${fmt(d.telemed.bestEst)}</td><td class="num">${pct(closingPct(d.telemed.bestEst,d.telemed.target))}</td></tr>
   <tr class="summary-light no-sort-row"><td>% TELEMED</td><td class="num">${pct(d.telemed.pctActual)}</td><td class="num">${pct(d.telemed.pctTarget)}</td><td></td><td></td><td></td><td class="num">${pct(d.telemed.pctBestEst)}</td><td></td></tr>
-  <tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(d.telemed.varianceTarget)}</td><td class="summary-blue num">${fmt(d.telemed.varianceMtd)}</td><td></td><td></td><td></td><td></td></tr>
+  <tr class="no-sort-row"><td class="summary-blue-label">Variance Value</td><td></td><td class="var-val num ${vc(d.telemed.varianceTarget)}">${fmt(d.telemed.varianceTarget)}</td><td class="var-val num ${vc(d.telemed.varianceMtd)}">${fmt(d.telemed.varianceMtd)}</td><td></td><td></td><td></td><td></td></tr>
   <tr class="no-sort-row"><td class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(d.telemed.achieveTarget)}</td><td class="summary-blue num">${pct(d.telemed.achieveMtd)}</td><td></td><td></td><td></td><td></td></tr></tbody></table>`;
 
   $('#targetTable').innerHTML=h;
@@ -878,7 +879,7 @@ function renderTargetCategory(d){
   <tr class="summary-orange no-sort-row"><td colspan="2">TOTAL CATEGORY</td><td class="num">${fmt(tc.actual)}</td><td class="num">${fmt(tc.target)}</td><td class="num">${fmt(tc.mtdTarget)}</td><td></td><td></td><td class="num">${pct(tc.contribution)}</td><td class="num">${fmt(tc.offlineSales)}</td><td class="num">${fmt(tc.onlineSales)}</td><td class="num">${fmt(tc.bestEst)}</td><td class="num">${pct(closingPct(tc.bestEst,tc.target))}</td></tr>
   <tr class="summary-light no-sort-row"><td colspan="2">% CATEGORY</td><td class="num">${pct(cp.actual)}</td><td class="num">${pct(cp.target)}</td><td class="num">${pct(cp.mtdTarget)}</td><td></td><td></td><td class="num">${pct(tc.contribution)}</td><td></td><td></td><td class="num">${pct(cp.bestEst)}</td><td class="num">${pct(cp.bestEst)}</td></tr>
   <tr class="no-sort-row"><td colspan="12">&nbsp;</td></tr>
-  <tr class="no-sort-row"><td colspan="2" class="summary-blue-label">Variance Value</td><td></td><td class="summary-pink num">${fmt(tc.varianceTarget)}</td><td class="summary-blue num">${fmt(tc.varianceMtd)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  <tr class="no-sort-row"><td colspan="2" class="summary-blue-label">Variance Value</td><td></td><td class="var-val num ${vc(tc.varianceTarget)}">${fmt(tc.varianceTarget)}</td><td class="var-val num ${vc(tc.varianceMtd)}">${fmt(tc.varianceMtd)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
   <tr class="no-sort-row"><td colspan="2" class="summary-blue">Achieve Target %</td><td></td><td class="summary-blue num">${pct(tc.achieve)}</td><td class="summary-blue num">${pct(tc.achieveMtd)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>`;
 
   $('#categoryTargetTable').innerHTML=h;
@@ -909,15 +910,16 @@ function renderStore(d){
   const row=(label,cls,fn)=>`<tr class="no-sort-row"><td colspan="3" class="${cls}">${label}</td>${[0,1,2].map(metric=>order.map(i=>`<td class="num ${cls}">${fn(i,metric)}</td>`).join('')).join('')}</tr>`;
 
   if(n>1){
-    h+=row('Variance Value','summary-blue-label',(i,metric)=>{
-      const v=d.variance[i];if(!v)return '';
+    const vRow=(label,labelCls,cellCls,fn)=>`<tr class="no-sort-row"><td colspan="3" class="${labelCls}">${label}</td>${[0,1,2].map(metric=>order.map(i=>{const x=fn(i,metric);return `<td class="num ${cellCls} ${x==null?'':vc(x.raw)}">${x==null?'':x.text}</td>`}).join('')).join('')}</tr>`;
+    h+=vRow('Variance Value','summary-blue-label','var-val',(i,metric)=>{
+      const v=d.variance[i];if(!v)return null;
       const k=metric===0?primaryKey:metric===1?'trx':basketKey;
-      return fmt(v[k]);
+      return {raw:v[k],text:fmt(v[k])};
     });
-    h+=row('Variance %','summary-blue',(i,metric)=>{
-      const v=d.variance[i];if(!v)return '';
+    h+=vRow('Variance %','summary-blue','var-pct',(i,metric)=>{
+      const v=d.variance[i];if(!v)return null;
       const k=metric===0?(qtyMode?'qtyPct':'salesPct'):metric===1?'trxPct':(qtyMode?'basketQtyPct':'basketPct');
-      return fp(v[k]);
+      return {raw:v[k],text:fp(v[k])};
     });
   }
 
