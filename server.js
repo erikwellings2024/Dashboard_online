@@ -139,7 +139,7 @@ const DEFAULT_CONFIG = {
 
 let config = null;
 let rawRows = []; // legacy compatibility only; v22 no longer keeps all history in RAM.
-let metaIndex = { brands:[], categories:[], rawCategories:[], salesTypes:[], customerTypes:[], products:[] };
+let metaIndex = { brands:[], categories:[], rawCategories:[], salesTypes:[], customerTypes:[], products:[], customers:[] };
 let runtime = { updatedAt: null, sourceFile: null, rowCount: 0, minDate: null, maxDate: null, uploadHistory: [] };
 let monthIndex = {};
 let autoSyncStatus = {
@@ -473,7 +473,20 @@ async function readRowsForPeriods(periods) {
 }
 
 function emptyMetaIndex(){
-  return {brands:[],categories:[],rawCategories:[],salesTypes:[],customerTypes:[],products:[]};
+  return {brands:[],categories:[],rawCategories:[],salesTypes:[],customerTypes:[],products:[],customers:[]};
+}
+
+// V68: business customers (OTHER CHANNELS) for the Channel Master dropdown.
+function customerMap(list){
+  return new Map((list||[]).map(c=>[c.code,c]));
+}
+function addCustomer(map,r){
+  if(!r.customerCode || !r.customerName) return;
+  const prev=map.get(r.customerCode);
+  if(!prev) map.set(r.customerCode,{code:r.customerCode,name:r.customerName,channel:r.rawChannel||r.channel||''});
+}
+function customerList(map){
+  return [...map.values()].sort((a,b)=>a.code.localeCompare(b.code));
 }
 
 function mergeMetaRows(target,rows){
@@ -483,8 +496,10 @@ function mergeMetaRows(target,rows){
   const salesTypes=new Set(target.salesTypes||[]);
   const customerTypes=new Set(target.customerTypes||[]);
   const products=new Map((target.products||[]).map(p=>[`${p.sku}|${p.itemName}`,p]));
+  const customers=customerMap(target.customers);
 
   for(const r of rows||[]){
+    addCustomer(customers,r);
     if(r.brand) brands.add(r.brand);
     if(r.category) categories.add(r.category);
     if(r.rawCategory) rawCategories.add(String(r.rawCategory).trim().toUpperCase());
@@ -506,7 +521,8 @@ function mergeMetaRows(target,rows){
     rawCategories:[...rawCategories].sort(),
     salesTypes:[...salesTypes].sort(),
     customerTypes:[...customerTypes].sort(),
-    products:[...products.values()]
+    products:[...products.values()],
+    customers:customerList(customers)
   };
 }
 
@@ -766,8 +782,55 @@ function excelDateToISO(v) {
 
 function canonicalChannel(rawName) {
   const raw = String(rawName || '').trim().toUpperCase();
-  const exact = config.channels.find(c => c.active && String(c.rawName || c.name).trim().toUpperCase() === raw);
-  return exact ? exact.name : raw;
+  // V68: only main channels (no parent) are matched against the TELEMED column.
+  const exact = config.channels.find(c => c.active && !c.parent && String(c.rawName || c.name).trim().toUpperCase() === raw);
+  if (exact) return exact.name;
+  // V68: a sub channel matched by TELEMED (e.g. "SHOPEE FARMA") counts under its parent.
+  const sub = config.channels.find(c => c.active && c.parent && c.matchBy === 'telemed' && subChannelCodes(c).has(raw));
+  if (sub && config.channels.some(p => p.active && !p.parent && p.name === sub.parent)) return sub.parent;
+  return raw;
+}
+
+// V68 Sub Channel ---------------------------------------------------------
+// A sub channel lives under a main channel (parent) and is matched by the
+// raw customer_code. Main-channel totals, targets and filters are unchanged;
+// sub channels are only a breakdown shown in Channel Performance.
+function customerFields(r){
+  const code=String(r.customer_code||'').trim().toUpperCase();
+  if(!code || code==='WALK-IN' || code==='WALK IN') return {};
+  const out={customerCode:code};
+  // Customer name is kept only for business accounts (OTHER CHANNELS) so the
+  // admin dropdown can show "CODE - Name" without storing member names.
+  if(String(r.customer_type||'').trim().toUpperCase()==='OTHER CHANNELS'){
+    const name=String(r.customer_name||'').trim();
+    if(name) out.customerName=name;
+  }
+  return out;
+}
+
+function activeSubChannels(parentName){
+  const parent=config.channels.find(c=>c.active && !c.parent && c.name===parentName);
+  if(!parent) return [];
+  return config.channels
+    .filter(c=>c.active && c.parent===parentName)
+    .sort((a,b)=>(a.sort||999)-(b.sort||999));
+}
+
+function rowMatchesSub(r,sc){
+  const codes=subChannelCodes(sc);
+  if(sc.matchBy==='telemed') return codes.has(String(r.rawChannel||'').trim().toUpperCase());
+  return !!r.customerCode && codes.has(r.customerCode);
+}
+
+function subChannelName(r){
+  const subs=activeSubChannels(r.channel);
+  if(!subs.length) return '';
+  for(const sc of subs) if(rowMatchesSub(r,sc)) return sc.name;
+  return r.channel;
+}
+
+function subChannelCodes(sub){
+  return new Set(String(sub.rawName||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean));
 }
 
 function canonicalStore(rawName) {
@@ -816,7 +879,8 @@ function mappedCategoryList() {
 }
 
 function activeChannels() {
-  return config.channels.filter(c => c.active).sort((a,b) => (a.sort || 999) - (b.sort || 999));
+  // Main channels only. Sub channels are reached via activeSubChannels().
+  return config.channels.filter(c => c.active && !c.parent).sort((a,b) => (a.sort || 999) - (b.sort || 999));
 }
 
 function normalizeRawChannel(r) {
@@ -860,6 +924,7 @@ function normalizeRow(r) {
     rawCategory: String(r.category_2 ?? '').trim().toUpperCase(),
     category: mapCategory(r.category_2),
     customerType: String(r.customer_type || '').trim() || 'UNSPECIFIED',
+    ...customerFields(r),
     salesType: String(r.trader_check || '').trim() || 'Regular',
     // Excel reference dashboard uses sub_total_inv as the sales measure.
     // Fall back to sub_total only when sub_total_inv is missing/blank.
@@ -1151,6 +1216,8 @@ async function streamReplaceMonthFromXlsx(filePath, targetMonth) {
           brand:get('brand'),
           category_2:get('category_2'),
           customer_type:get('customer_type'),
+          customer_code:get('customer_code'),
+          customer_name:get('customer_name'),
           trader_check:get('trader_check'),
           sub_total:get('sub_total'),
           // V66: XLSX downloaded manually from Metabase New has sales_gross.
@@ -1424,16 +1491,33 @@ function basketSizeDetailQuery(sourceRows,periods,filters,bandsInput,showRows){
 function channelQuery(sourceRows, periods, filters) {
   const base = filterBase(sourceRows,filters);
   const channels = activeChannels();
-  const rows = channels.map(c => {
-    const subset = base.filter(r => r.channel === c.name);
+  const buildRow = (name, subset, extra={}) => {
     const m = metricsByPeriod(subset, periods);
     const p1 = m[1] || null, p2 = m[2] || null, cur = m[0];
     return {
-      channel: c.name,
+      channel: name,
+      ...extra,
       periods: m,
       growthP1: p1 ? { sales: diffPct(cur.sales,p1.sales), trx: diffPct(cur.trx,p1.trx), basket: diffPct(cur.basket,p1.basket) } : null,
       growthP2: p2 ? { sales: diffPct(cur.sales,p2.sales), trx: diffPct(cur.trx,p2.trx), basket: diffPct(cur.basket,p2.basket) } : null
     };
+  };
+  const rows = channels.map(c => {
+    const subset = base.filter(r => r.channel === c.name);
+    const row = buildRow(c.name, subset);
+    // V68: sub channel breakdown. Parent total stays the full channel total.
+    const subs = activeSubChannels(c.name);
+    if (subs.length) {
+      const taken = new Set();
+      const children = subs.map(sc => {
+        const part = subset.filter(r => !taken.has(r) && rowMatchesSub(r, sc));
+        part.forEach(r => taken.add(r));
+        return buildRow(sc.name, part, { subChannel: true });
+      });
+      const rest = subset.filter(r => !taken.has(r));
+      row.children = [buildRow(c.name, rest, { subChannel: true, remainder: true }), ...children];
+    }
+    return row;
   });
   const total = metricsByPeriod(base, periods);
   const telemedNames = new Set(channels.filter(c => c.telemed).map(c => c.name));
@@ -2359,11 +2443,13 @@ function createMetaAccumulator(){
     rawCategories:new Set(),
     salesTypes:new Set(),
     customerTypes:new Set(),
-    products:new Map()
+    products:new Map(),
+    customers:new Map()
   };
 }
 
 function addMetaAccumulator(acc,r){
+  addCustomer(acc.customers,r);
   if(r.brand)acc.brands.add(r.brand);
   if(r.category)acc.categories.add(r.category);
   if(r.rawCategory)acc.rawCategories.add(String(r.rawCategory).trim().toUpperCase());
@@ -2401,6 +2487,10 @@ function mergeMetaAccumulator(target,acc){
   for(const [k,p] of acc.products){
     if(!products.has(k))products.set(k,p);
   }
+  const customers=customerMap(target.customers);
+  for(const [k,c] of acc.customers){
+    if(!customers.has(k))customers.set(k,c);
+  }
 
   return {
     brands:[...brands].sort(),
@@ -2408,7 +2498,8 @@ function mergeMetaAccumulator(target,acc){
     rawCategories:[...rawCategories].sort(),
     salesTypes:[...salesTypes].sort(),
     customerTypes:[...customerTypes].sort(),
-    products:[...products.values()]
+    products:[...products.values()],
+    customers:customerList(customers)
   };
 }
 
@@ -3597,6 +3688,8 @@ const RAW_EXPORT_COLUMNS=[
   {header:'PT',key:'pt',width:8},
   {header:'Store Stat',key:'storeStat',width:14},
   {header:'Channel',key:'channel',width:18},
+  {header:'Sub Channel',key:'subChannel',width:18},
+  {header:'Customer Code',key:'customerCode',width:18},
   {header:'SKU (New Item Code)',key:'sku',width:18},
   {header:'Item Name',key:'itemName',width:42},
   {header:'Unit Code',key:'unitCode',width:10},
@@ -3631,6 +3724,8 @@ function rawExportRecord(r){
     pt:r.pt||'',
     storeStat:effectiveStoreStatus(r),
     channel:r.channel||'',
+    subChannel:subChannelName(r),
+    customerCode:r.customerCode||'',
     sku:r.newItemCode||r.sku||'',
     itemName:r.itemName||'',
     unitCode:r.unitCode||'',
@@ -3970,6 +4065,58 @@ app.post('/api/admin/upload', requireAdmin, upload.single('file'), async (req,re
 });
 
 app.get('/api/admin/config', requireAdmin, (req,res)=>res.json(config));
+
+// V68: validate Channel Master incl. sub channels.
+function normalizeChannelMaster(list){
+  const rows=list.map((c,i)=>{
+    const parent=String(c.parent||'').trim().toUpperCase();
+    return {
+      name:String(c.name||'').trim().toUpperCase(),
+      parent,
+      matchBy:parent&&String(c.matchBy||'')==='customer_code'?'customer_code':'telemed',
+      rawName:String(c.rawName||(parent?'':c.name)||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean).join(','),
+      active:!!c.active,
+      telemed:!!c.telemed,
+      sort:Number(c.sort||i+1)
+    };
+  }).filter(c=>c.name);
+
+  const seen=new Set();
+  for(const c of rows){
+    if(seen.has(c.name)) throw new Error(`Nama Tampilan "${c.name}" dipakai lebih dari sekali.`);
+    seen.add(c.name);
+    if(!c.rawName) throw new Error(`"${c.name}": Nilai yang dicocokkan wajib diisi.`);
+  }
+  const mains=new Map(rows.filter(c=>!c.parent).map(c=>[c.name,c]));
+  for(const c of rows.filter(c=>c.parent)){
+    const p=mains.get(c.parent);
+    if(!p) throw new Error(`"${c.name}": Induk Channel "${c.parent}" tidak ditemukan atau bukan channel utama.`);
+    if(c.parent===c.name) throw new Error(`"${c.name}": channel tidak boleh menjadi induk dirinya sendiri.`);
+    // Online flag always follows the parent.
+    c.telemed=p.telemed;
+    if(c.matchBy==='telemed'){
+      for(const v of c.rawName.split(',')){
+        const clash=[...mains.values()].find(m=>m.rawName.split(',').includes(v));
+        if(clash) throw new Error(`"${c.name}": nilai Telemed "${v}" sudah dipakai channel utama "${clash.name}".`);
+      }
+    }
+  }
+  // Same customer code may not be used by two sub channels of one parent.
+  const codeOwner=new Map();
+  for(const c of rows.filter(c=>c.parent)){
+    for(const code of c.rawName.split(',')){
+      const k=`${c.parent}|${c.matchBy}|${code}`;
+      if(codeOwner.has(k)) throw new Error(`Customer code "${code}" dipakai di "${codeOwner.get(k)}" dan "${c.name}".`);
+      codeOwner.set(k,c.name);
+    }
+  }
+  return rows;
+}
+
+// V68: customer list (OTHER CHANNELS only) for the sub channel dropdown.
+app.get('/api/admin/channel-customers', requireAdmin, (req,res)=>{
+  res.json({customers:metaIndex.customers||[]});
+});
 app.put('/api/admin/config', requireAdmin, async (req,res)=>{
   const incoming=req.body||{};
   if (!Array.isArray(incoming.channels) || !Array.isArray(incoming.stores)) return res.status(400).json({error:'CONFIG_INVALID'});
@@ -3995,8 +4142,12 @@ app.put('/api/admin/config', requireAdmin, async (req,res)=>{
     else s.storeStatus=statusByStore.get(s.name);
   }
 
+  let normalizedChannels;
+  try { normalizedChannels=normalizeChannelMaster(incoming.channels); }
+  catch(e){ return res.status(400).json({error:e.message}); }
+
   config={
-    channels:incoming.channels.map((c,i)=>({name:String(c.name||'').trim().toUpperCase(),rawName:String(c.rawName||c.name||'').trim().toUpperCase(),active:!!c.active,telemed:!!c.telemed,sort:Number(c.sort||i+1)})).filter(c=>c.name&&c.rawName),
+    channels:normalizedChannels,
     stores:normalizedStores,
     categoryMap:Object.fromEntries(Object.entries(incoming.categoryMap&&typeof incoming.categoryMap==='object'?incoming.categoryMap:{}).map(([k,v])=>[
       String(k).trim().toUpperCase(),
