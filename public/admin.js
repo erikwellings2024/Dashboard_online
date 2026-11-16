@@ -29,11 +29,114 @@ function msg(id,text,ok=true){const el=$(id);el.className=ok?'success':'error';e
 $$('.admin-tab').forEach(b=>b.onclick=()=>{$$('.admin-tab').forEach(x=>x.classList.remove('active'));$$('.admin-panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#tab-'+b.dataset.tab).classList.add('active')});
 $('#logoutBtn').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
 
-function channelRow(c={name:'',rawName:'',sort:99,active:true,telemed:false}){return `<tr><td><input class="ch-name" value="${esc(c.name)}"></td><td><input class="ch-raw" value="${esc(c.rawName||c.name)}"></td><td><input class="ch-sort" type="number" value="${Number(c.sort||99)}"></td><td class="center"><input class="ch-active" type="checkbox" ${c.active?'checked':''}></td><td class="center"><input class="ch-telemed" type="checkbox" ${c.telemed?'checked':''}></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`}
-function renderChannels(){$('#channelTable tbody').innerHTML=CFG.channels.map(channelRow).join('');bindRemove()}
-function collectChannels(){return $$('#channelTable tbody tr').map(r=>({name:$('.ch-name',r).value,rawName:$('.ch-raw',r).value,sort:Number($('.ch-sort',r).value||99),active:$('.ch-active',r).checked,telemed:$('.ch-telemed',r).checked}))}
-$('#addChannel').onclick=()=>{$('#channelTable tbody').insertAdjacentHTML('beforeend',channelRow());bindRemove()};
-$('#saveChannels').onclick=async()=>{try{CFG.channels=collectChannels();await saveConfig();msg('#channelMsg','Channel master saved.')}catch(e){msg('#channelMsg',e.message,false)}};
+// V68 Channel Master: main channel (dicocokkan ke kolom TELEMED) dan
+// sub channel (dicocokkan ke customer_code, tampil sebagai baris expand
+// di bawah channel induknya).
+let CH_CUSTOMERS=[];
+async function loadChannelCustomers(){
+  try{CH_CUSTOMERS=(await api('/api/admin/channel-customers')).customers||[]}catch{CH_CUSTOMERS=[]}
+  const dl=$('#chCustomerList');
+  if(dl)dl.innerHTML=CH_CUSTOMERS.map(c=>`<option value="${esc(c.code)}">${esc(c.code)} – ${esc(c.name)}${c.channel?` (Telemed: ${esc(c.channel)})`:''}</option>`).join('');
+  const dt=$('#chTelemedList');
+  if(dt)dt.innerHTML=[...new Set(CH_CUSTOMERS.map(c=>c.channel).filter(Boolean))].sort().map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  $$('#channelTable tbody tr').forEach(updateChannelRowState);
+}
+function channelRow(c={name:'',rawName:'',sort:99,active:true,telemed:false,parent:'',matchBy:'telemed'}){
+  const isSub=!!c.parent;
+  return `<tr class="${isSub?'ch-sub-row':''}">
+    <td><input class="ch-name" value="${esc(c.name)}" placeholder="mis. SHOPEE FARMA"></td>
+    <td><select class="ch-parent" data-value="${esc(c.parent||'')}"></select></td>
+    <td class="center"><span class="ch-matchby badge"></span><select class="ch-matchsel"><option value="telemed" ${c.matchBy!=='customer_code'?'selected':''}>Telemed</option><option value="customer_code" ${c.matchBy==='customer_code'?'selected':''}>Customer Code</option></select></td>
+    <td><input class="ch-raw" value="${esc(c.rawName||(isSub?'':c.name))}"></td>
+    <td class="ch-status"></td>
+    <td><input class="ch-sort" type="number" value="${Number(c.sort||99)}"></td>
+    <td class="center"><input class="ch-active" type="checkbox" ${c.active?'checked':''}></td>
+    <td class="center"><input class="ch-telemed" type="checkbox" ${c.telemed?'checked':''}></td>
+    <td class="action-cell"><button class="btn red remove-row">Remove</button></td>
+  </tr>`;
+}
+function mainChannelNames(){
+  return $$('#channelTable tbody tr')
+    .filter(r=>!$('.ch-parent',r).value && !$('.ch-parent',r).dataset.value)
+    .map(r=>$('.ch-name',r).value.trim().toUpperCase())
+    .filter(Boolean);
+}
+function refreshParentOptions(){
+  const mains=[...new Set(mainChannelNames())];
+  $$('#channelTable tbody tr').forEach(r=>{
+    const sel=$('.ch-parent',r);
+    const cur=(sel.dataset.value!==undefined&&sel.dataset.value!=='')?sel.dataset.value:sel.value;
+    const own=$('.ch-name',r).value.trim().toUpperCase();
+    const opts=mains.filter(n=>n!==own);
+    if(cur&&!opts.includes(cur))opts.push(cur);
+    sel.innerHTML=`<option value="">— (channel utama)</option>`+opts.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    sel.value=cur||'';
+    delete sel.dataset.value;
+  });
+}
+function updateChannelRowState(r){
+  const parent=$('.ch-parent',r).value;
+  const isSub=!!parent;
+  r.classList.toggle('ch-sub-row',isSub);
+  const mb=$('.ch-matchby',r), ms=$('.ch-matchsel',r);
+  // Channel utama selalu Telemed; sub channel boleh pilih Telemed atau Customer Code.
+  mb.textContent='Telemed';mb.className='ch-matchby badge open';
+  mb.style.display=isSub?'none':'';ms.style.display=isSub?'':'none';
+  const byCode=isSub&&ms.value==='customer_code';
+  const raw=$('.ch-raw',r);
+  raw.placeholder=!isSub?'sama persis dgn kolom TELEMED':byCode?'kode customer, mis. SHOPEEFARMA':'nilai TELEMED, mis. SHOPEE FARMA';
+  if(!isSub)raw.removeAttribute('list');else raw.setAttribute('list',byCode?'chCustomerList':'chTelemedList');
+  // Online ikut induk
+  const tel=$('.ch-telemed',r);
+  if(isSub){
+    const pr=$$('#channelTable tbody tr').find(x=>!$('.ch-parent',x).value&&$('.ch-name',x).value.trim().toUpperCase()===parent);
+    tel.checked=pr?$('.ch-telemed',pr).checked:false;
+    tel.disabled=true;tel.title='Online mengikuti channel induk';
+  }else{tel.disabled=false;tel.title=''}
+  // Status data
+  const st=$('.ch-status',r);
+  if(!isSub){st.innerHTML='<span class="ch-hint">–</span>';return}
+  const codes=raw.value.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
+  if(!codes.length){st.innerHTML='<span class="badge closed">Wajib diisi</span>';return}
+  if(!byCode){
+    const known=new Set(CH_CUSTOMERS.map(c=>c.channel));
+    st.innerHTML=codes.map(v=>known.has(v)
+      ?`<span class="badge open">✔ ${esc(v)} ada di data</span>`
+      :`<span class="badge closed" title="Nilai ini belum ditemukan di data tersimpan. Cek ejaan, atau sync ulang data setelah Metabase direvisi.">⚠ ${esc(v)} belum ada di data</span>`).join(' ');
+    return;
+  }
+  st.innerHTML=codes.map(code=>{
+    const c=CH_CUSTOMERS.find(x=>x.code===code);
+    if(!c)return `<span class="badge closed" title="Kode ini belum ditemukan di data yang tersimpan. Cek ejaan, atau sync ulang data setelah Metabase direvisi.">⚠ ${esc(code)} belum ada di data</span>`;
+    const warn=c.channel&&c.channel!==parent;
+    return `<span class="badge ${warn?'closed':'open'}" title="Telemed di data: ${esc(c.channel||'-')}">${warn?'⚠':'✔'} ${esc(c.name)}${warn?` (Telemed ${esc(c.channel)}, bukan ${esc(parent)} — pilih "Telemed" dan isi ${esc(c.channel)})`:''}</span>`;
+  }).join(' ');
+}
+function sortChannelsForView(list){
+  const mains=list.filter(c=>!c.parent).sort((a,b)=>(a.sort||999)-(b.sort||999));
+  const out=[];
+  for(const m of mains){out.push(m);out.push(...list.filter(c=>c.parent===m.name).sort((a,b)=>(a.sort||999)-(b.sort||999)))}
+  out.push(...list.filter(c=>c.parent&&!mains.some(m=>m.name===c.parent)));
+  return out;
+}
+function bindChannelRows(){
+  bindRemove();
+  $$('#channelTable tbody tr').forEach(r=>{
+    if(r.dataset.bound)return;r.dataset.bound='1';
+    $('.ch-name',r).addEventListener('change',()=>{refreshParentOptions();$$('#channelTable tbody tr').forEach(updateChannelRowState)});
+    $('.ch-parent',r).addEventListener('change',()=>{refreshParentOptions();$$('#channelTable tbody tr').forEach(updateChannelRowState)});
+    $('.ch-raw',r).addEventListener('input',()=>updateChannelRowState(r));
+    $('.ch-matchsel',r).addEventListener('change',()=>updateChannelRowState(r));
+    $('.ch-telemed',r).addEventListener('change',()=>$$('#channelTable tbody tr').forEach(updateChannelRowState));
+  });
+  refreshParentOptions();
+  $$('#channelTable tbody tr').forEach(updateChannelRowState);
+}
+function renderChannels(){$('#channelTable tbody').innerHTML=sortChannelsForView(CFG.channels||[]).map(channelRow).join('');bindChannelRows();loadChannelCustomers()}
+function collectChannels(){return $$('#channelTable tbody tr').map(r=>{const parent=$('.ch-parent',r).value;return {name:$('.ch-name',r).value,parent,matchBy:parent?$('.ch-matchsel',r).value:'telemed',rawName:$('.ch-raw',r).value,sort:Number($('.ch-sort',r).value||99),active:$('.ch-active',r).checked,telemed:$('.ch-telemed',r).checked}})}
+$('#addChannel').onclick=()=>{$('#channelTable tbody').insertAdjacentHTML('beforeend',channelRow());bindChannelRows()};
+$('#addSubChannel').onclick=()=>{const first=mainChannelNames()[0]||'';$('#channelTable tbody').insertAdjacentHTML('beforeend',channelRow({name:'',rawName:'',sort:1,active:true,telemed:false,parent:first,matchBy:'telemed'}));bindChannelRows()};
+$('#saveChannels').onclick=async()=>{try{CFG.channels=collectChannels();await saveConfig();renderChannels();renderTarget();msg('#channelMsg','Channel master saved.')}catch(e){msg('#channelMsg',e.message,false)}};
 
 function storeRow(s={name:'',rawName:'',pt:'EFM',storeStatus:'Existing Store',active:true}){return `<tr><td><input class="st-name" value="${esc(s.name)}"></td><td><input class="st-raw" value="${esc(s.rawName)}"></td><td><select class="st-pt"><option ${s.pt==='EFM'?'selected':''}>EFM</option><option ${s.pt==='EFIT'?'selected':''}>EFIT</option><option ${s.pt==='ESB'?'selected':''}>ESB</option></select></td><td><select class="st-status"><option value="Existing Store" ${s.storeStatus!=='New Store'?'selected':''}>Existing Store</option><option value="New Store" ${s.storeStatus==='New Store'?'selected':''}>New Store</option></select></td><td class="center"><input class="st-active" type="checkbox" ${s.active?'checked':''}></td><td class="action-cell"><button class="btn red remove-row">Remove</button></td></tr>`}
 function renderStores(){$('#storeTable tbody').innerHTML=CFG.stores.map(storeRow).join('');bindRemove()}
@@ -43,7 +146,7 @@ $('#saveStores').onclick=async()=>{try{CFG.stores=collectStores();await saveConf
 function bindRemove(){$$('.remove-row').forEach(b=>b.onclick=()=>b.closest('tr').remove())}
 async function saveConfig(){const d=await api('/api/admin/config',{method:'PUT',body:JSON.stringify(CFG)});CFG=d.config;return d}
 
-function renderTarget(){const month=$('#targetConfigMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
+function renderTarget(){const month=$('#targetConfigMonth').value;const t=CFG.targets[month]||{};$('#targetTable tbody').innerHTML=CFG.channels.filter(c=>c.active&&!c.parent).sort((a,b)=>a.sort-b.sort).map(c=>`<tr><td>${esc(c.name)}</td><td><input class="target-value" data-channel="${esc(c.name)}" type="number" value="${Number(t[c.name]||0)}"></td></tr>`).join('')}
 $('#loadTarget').onclick=renderTarget;
 $('#saveTarget').onclick=async()=>{try{const month=$('#targetConfigMonth').value;if(!month)throw new Error('Choose target month');CFG.targets[month]=CFG.targets[month]||{};$$('.target-value').forEach(x=>CFG.targets[month][x.dataset.channel]=Number(x.value||0));await saveConfig();msg('#targetMsg','Target Online saved for '+month)}catch(e){msg('#targetMsg',e.message,false)}};
 

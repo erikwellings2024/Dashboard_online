@@ -1919,3 +1919,21 @@ body.dash-fit .export-section .rank-grid > .rank-box{flex:0 0 auto;max-width:100
 
 /* Variance: merah jika minus, hijau jika naik */
 .var-val{background:#eef5fc!important;color:#25303b;font-weight:700}.var-pct{background:#dcebf8!important;color:#25303b;font-weight:700}.var-val.var-neg,.var-pct.var-neg{color:#c62828!important}.var-val.var-pos,.var-pct.var-pos{color:#1b7a3a!important}
+
+/* V68 Channel Master sub channel */
+.ch-guide{background:#f6f8fa;border:1px solid #d9dee3;padding:6px 10px;margin:4px 0 10px}
+.ch-guide p{margin:4px 0;font-size:10.5px!important;color:#344054!important}
+.ch-guide code{background:#fff;border:1px solid #d9dee3;padding:0 4px;font-size:10px}
+#channelTable tr.ch-sub-row td{background:#f5f9f6}
+#channelTable tr.ch-sub-row .ch-name{padding-left:18px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 1v6h7' stroke='%23667085' fill='none' stroke-width='1.4'/%3E%3C/svg%3E") 4px 50% no-repeat}
+#channelTable .ch-status{white-space:normal;min-width:180px}
+#channelTable .ch-status .badge{margin:1px 0}
+#channelTable .ch-hint{color:#98a2b3}
+#channelTable .ch-sort{max-width:70px}
+/* V68 Channel Performance expandable sub channel rows */
+.ch-toggle{display:inline-block;width:16px;height:16px;line-height:14px;text-align:center;border:1px solid #8a96a3;border-radius:3px;background:#fff;color:#25303b;font-weight:700;font-size:12px;cursor:pointer;margin-right:6px;padding:0;vertical-align:middle}
+tr.ch-child td{background:#f7f9fb;color:#475467}
+tr.ch-child td:first-child{padding-left:30px}
+tr.ch-child.ch-hidden{display:none}
+.ch-toggle::before{content:'+'}.ch-toggle.open::before{content:'\2212'}
+#channelTable .ch-matchsel{height:30px;font-size:10px}

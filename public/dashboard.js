@@ -772,8 +772,18 @@ function renderChannel(d){
 
   let h=`<table class="sortable-table chart-table" data-chart-label="0"><thead><tr><th rowspan="2">CHANNEL</th>${groupHead('CURRENT',ps[0],'group-current')}${hasP1?groupHead('PREVIOUS 1',ps[1],'group-prev1'):''}${hasP2?groupHead('PREVIOUS 2',ps[2],'group-prev2'):''}${hasP1?'<th colspan="3" class="group-growth">GROWTH vs P1</th>':''}${hasP2?'<th colspan="3" class="group-growth">GROWTH vs P2</th>':''}</tr><tr>${Array.from({length:n},()=>'<th>Sales</th><th>Trx</th><th>Basket Size</th>').join('')}${hasP1?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}${hasP2?'<th>Sales</th><th>Trx</th><th>Basket</th>':''}</tr></thead><tbody>`;
 
+  const chCells=r=>`${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?`<td class="num ${r.growthP1?.sales>=0?'pos':'neg'}">${fp(r.growthP1?.sales)}</td><td class="num ${r.growthP1?.trx>=0?'pos':'neg'}">${fp(r.growthP1?.trx)}</td><td class="num ${r.growthP1?.basket>=0?'pos':'neg'}">${fp(r.growthP1?.basket)}</td>`:''}${hasP2?`<td class="num ${r.growthP2?.sales>=0?'pos':'neg'}">${fp(r.growthP2?.sales)}</td><td class="num ${r.growthP2?.trx>=0?'pos':'neg'}">${fp(r.growthP2?.trx)}</td><td class="num ${r.growthP2?.basket>=0?'pos':'neg'}">${fp(r.growthP2?.basket)}</td>`:''}`;
+  S.channelOpen=S.channelOpen||{};
   for(const r of d.rows){
-    h+=`<tr><td>${esc(r.channel)}</td>${r.periods.map(m=>`<td class="num">${fmt(m.sales)}</td><td class="num">${fmt(m.trx)}</td><td class="num">${fmt(m.basket)}</td>`).join('')}${hasP1?`<td class="num ${r.growthP1?.sales>=0?'pos':'neg'}">${fp(r.growthP1?.sales)}</td><td class="num ${r.growthP1?.trx>=0?'pos':'neg'}">${fp(r.growthP1?.trx)}</td><td class="num ${r.growthP1?.basket>=0?'pos':'neg'}">${fp(r.growthP1?.basket)}</td>`:''}${hasP2?`<td class="num ${r.growthP2?.sales>=0?'pos':'neg'}">${fp(r.growthP2?.sales)}</td><td class="num ${r.growthP2?.trx>=0?'pos':'neg'}">${fp(r.growthP2?.trx)}</td><td class="num ${r.growthP2?.basket>=0?'pos':'neg'}">${fp(r.growthP2?.basket)}</td>`:''}</tr>`;
+    const kids=Array.isArray(r.children)?r.children:[];
+    const key=esc(r.channel);
+    const open=!!S.channelOpen[r.channel];
+    const toggle=kids.length?`<button type="button" class="ch-toggle${open?' open':''}" data-ch-toggle="${key}" title="Tampilkan / sembunyikan rincian"></button>`:'';
+    h+=`<tr${kids.length?` data-ch-group="${key}"`:''}><td>${toggle}${esc(r.channel)}</td>${chCells(r)}</tr>`;
+    // V68: sub channel rows (not included in TOTAL, not sorted on their own)
+    for(const k of kids){
+      h+=`<tr class="ch-child${open?'':' ch-hidden'}" data-ch-parent="${key}"><td>↳ ${esc(k.channel)}</td>${chCells(k)}</tr>`;
+    }
   }
 
   const tg1=hasP1?{
@@ -819,6 +829,14 @@ function renderChannel(d){
   t.dataset.chartCols=cols.join(',');
   t.dataset.chartSeries=['Current',...(hasP1?['Previous 1']:[]),...(hasP2?['Previous 2']:[])].join(',');
   enhanceTable(t);
+  $$('[data-ch-toggle]',t).forEach(b=>b.addEventListener('click',e=>{
+    e.preventDefault();e.stopPropagation();
+    const name=b.dataset.chToggle;
+    const open=!S.channelOpen[name];
+    S.channelOpen[name]=open;
+    b.classList.toggle('open',open);
+    $$('tr.ch-child',t).filter(r=>r.dataset.chParent===name).forEach(r=>r.classList.toggle('ch-hidden',!open));
+  }));
 }
 
 function renderTarget(d){
@@ -1217,7 +1235,9 @@ function sortRows(table,col,clickedHeader){
   if(!body) return;
 
   const allRows=$$('tr',body);
-  const sortableRows=allRows.filter(r=>!r.classList.contains('no-sort-row'));
+  // V68: sub channel rows (.ch-child) are not sorted alone; they stay under their parent row.
+  const childRows=allRows.filter(r=>r.classList.contains('ch-child'));
+  const sortableRows=allRows.filter(r=>!r.classList.contains('no-sort-row')&&!r.classList.contains('ch-child'));
   const pinnedRows=allRows.filter(r=>r.classList.contains('no-sort-row'));
 
   const isSame=Number(table.dataset.sortCol)===col;
@@ -1237,7 +1257,12 @@ function sortRows(table,col,clickedHeader){
     return cmp*direction;
   });
 
-  sortableRows.concat(pinnedRows).forEach(r=>body.appendChild(r));
+  sortableRows.forEach(r=>{
+    body.appendChild(r);
+    const g=r.dataset.chGroup;
+    if(g)childRows.filter(c=>c.dataset.chParent===g).forEach(c=>body.appendChild(c));
+  });
+  pinnedRows.forEach(r=>body.appendChild(r));
 
   table.dataset.sortCol=String(col);
   table.dataset.sortDir=nextDir;
@@ -1616,7 +1641,7 @@ $$('.metric-select').forEach(sel=>sel.onchange=()=>{
   }
 });
 $$('.chart-btn').forEach(b=>b.onclick=()=>createChart(b.closest('.section')));
-function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')).slice(0,15),labelCols=(t.dataset.chartLabelCols||'').split(',').filter(x=>x!=='').map(Number);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>labelCols.length?labelCols.map(c=>r.cells[c]?.textContent||'').filter(Boolean).join(' > '):(r.cells[labelCol]?.textContent||'')),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
+function createChart(sec){const tables=$$('table.chart-table',sec);if(!tables.length)return alert('No chart data');const sets=tables.map(t=>{const cols=(t.dataset.chartCols||'1').split(',').map(Number),names=(t.dataset.chartSeries||'Value').split(','),labelCol=Number(t.dataset.chartLabel||0);const rows=$$('tbody tr',t).filter(r=>!r.classList.contains('no-sort-row')&&!r.classList.contains('ch-child')).slice(0,15),labelCols=(t.dataset.chartLabelCols||'').split(',').filter(x=>x!=='').map(Number);return{title:t.closest('.rank-box')?.querySelector('h3')?.textContent||$('h2',sec).textContent,labels:rows.map(r=>labelCols.length?labelCols.map(c=>r.cells[c]?.textContent||'').filter(Boolean).join(' > '):(r.cells[labelCol]?.textContent||'')),series:names.map((name,i)=>({name,values:rows.map(r=>Number((r.cells[cols[i]]?.textContent||'0').replace(/,/g,'').replace(/[^0-9.-]/g,''))||0)}))}});const periods=[];$$('.range .control span:first-child',$('.section-filter',sec)).forEach((x,i)=>periods.push({name:i===0?'Current':'Previous '+i,value:x.textContent}));const w=window.open('','_blank');if(!w)return alert('Allow popup for Create Chart');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc($('h2',sec).textContent)} Chart</title><style>body{font-family:Arial;background:#f4f6f8;padding:22px;color:#1f2937}.page{max-width:1250px;margin:auto}.periods{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.period{background:#fff;border:1px solid #cbd3da;padding:6px 8px;font-size:11px}.box{background:#fff;border:1px solid #c7cfd7;padding:14px;margin:0 0 18px}.legend{display:flex;gap:12px;font-size:11px;margin:8px 0 12px}canvas{display:block;max-width:100%}</style></head><body><div class="page"><h1>${esc($('h2',sec).textContent)}</h1><div class="periods">${periods.map(p=>`<span class="period"><b>${p.name}:</b> ${p.value}</span>`).join('')}</div><div id="root"></div></div><script>const sets=${JSON.stringify(sets)},colors=['#4d9a63','#5d8fb9','#d49a3a'];function compact(v){if(Math.abs(v)>=1e9)return(v/1e9).toFixed(1)+'B';if(Math.abs(v)>=1e6)return(v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(0)+'K';return Math.round(v)}function draw(c,d){const W=1180,rowH=Math.max(60,38+d.series.length*12),H=Math.max(350,95+d.labels.length*rowH),dpr=devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';const x=c.getContext('2d');x.scale(dpr,dpr);const L=220,R=55,T=38,B=42,cw=W-L-R,ch=H-T-B,max=Math.max(1,...d.series.flatMap(s=>s.values)),gh=ch/Math.max(1,d.labels.length),gap=6,bh=Math.max(10,Math.min(18,(gh-20)/d.series.length));x.font='11px Arial';for(let q=0;q<=5;q++){const xx=L+cw*q/5;x.strokeStyle='#dde3e9';x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();x.fillStyle='#667085';x.fillText(compact(max*q/5),xx-10,H-B+20)}d.labels.forEach((lab,i)=>{const gy=T+i*gh;if(i%2===0){x.fillStyle='#f8fafb';x.fillRect(0,gy,W,gh)}x.strokeStyle='#c7d0d8';x.lineWidth=1.4;x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke();x.fillStyle='#344054';x.font='bold 11px Arial';x.fillText(lab.slice(0,30),10,gy+gh/2+4);d.series.forEach((s,j)=>{const v=s.values[i]||0,bw=Math.max(0,v)/max*cw,y=gy+10+j*(bh+gap);x.fillStyle=colors[j%colors.length];x.fillRect(L,y,bw,bh);x.fillStyle=bw>70?'#fff':'#475467';x.font='10px Arial';x.fillText(compact(v),bw>70?L+bw-50:L+bw+5,y+bh-3)})})}const root=document.getElementById('root');sets.forEach(d=>{const box=document.createElement('div');box.className='box';box.innerHTML='<h2>'+d.title+'</h2><div class="legend">'+d.series.map((s,i)=>'<span><b style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';margin-right:4px"></b>'+s.name+'</span>').join('')+'</div>';const c=document.createElement('canvas');box.appendChild(c);root.appendChild(box);draw(c,d)})<\/script></body></html>`);w.document.close()}
 
 
 function normalUpdateHeaderText(){
