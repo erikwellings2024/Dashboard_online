@@ -106,7 +106,7 @@ function previous2Control(){
 function multiControl(key,label,options,selected,search=false){
   const vals=(options||[]).map(o=>typeof o==='string'?o:o.name);
   const set=new Set(selected||[]);
-  return `<div class="field multi" data-key="${key}"><label>${label}</label><button class="control" type="button"><span class="multi-label">${set.size===vals.length?'All '+label:set.size+' Selected'}</span><span>▾</span></button><div class="drop">${search?'<input class="search-input" placeholder="Search...">':''}<label class="check"><input type="checkbox" class="toggle-all" ${set.size===vals.length?'checked':''}>Select All</label>${vals.map(v=>`<label class="check option"><input type="checkbox" value="${esc(v)}" ${set.has(v)?'checked':''}>${esc(v)}</label>`).join('')}</div></div>`;
+  return `<div class="field multi" data-key="${key}"><label>${label}</label><button class="control" type="button"><span class="multi-label">${set.size===vals.length?'All '+label:set.size+' Selected'}</span><span>▾</span></button><div class="drop">${search?'<input class="search-input" placeholder="Search...">':''}<label class="check"><input type="checkbox" class="toggle-all" ${set.size===vals.length?'checked':''}>Select All</label>${vals.map(v=>`<label class="check option"><input type="checkbox" value="${esc(v)}" ${set.has(v)?'checked':''}>${key==='channels'&&(META.subChannels||{})[v]?'&nbsp;&nbsp;↳ ':''}${esc(v)}</label>`).join('')}</div></div>`;
 }
 function showRowControl(){
   return `<div class="field"><label>Show Row</label><select class="control" id="showRows">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===S.showRows?'selected':''}>${n}</option>`).join('')}</select></div>`;
