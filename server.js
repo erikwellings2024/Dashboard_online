@@ -822,6 +822,31 @@ function rowMatchesSub(r,sc){
   return !!r.customerCode && codes.has(r.customerCode);
 }
 
+// V68: "leaf" channel used by the Channel filter: a sub channel row counts as
+// its sub channel name, every other row as its main channel.
+function makeLeafChannel(){
+  const subsByParent=new Map();
+  for(const p of activeChannels()){
+    const subs=activeSubChannels(p.name);
+    if(subs.length)subsByParent.set(p.name,subs);
+  }
+  return r=>{
+    const subs=subsByParent.get(r.channel);
+    if(subs)for(const sc of subs)if(rowMatchesSub(r,sc))return sc.name;
+    return r.channel;
+  };
+}
+
+// Requested channel list -> main channels (a sub channel brings its parent).
+function requestedMainChannels(list){
+  const out=new Set();
+  for(const x of list){
+    const c=config.channels.find(c=>c.active&&c.name===x);
+    out.add(c&&c.parent?c.parent:x);
+  }
+  return [...out];
+}
+
 function subChannelName(r){
   const subs=activeSubChannels(r.channel);
   if(!subs.length) return '';
@@ -1330,6 +1355,7 @@ function filterBase(sourceRows, filters = {}) {
   const customerTypes = arr(filters.customerTypes).map(x => x.toUpperCase());
   const storeStats = arr(filters.storeStats).map(x => x.toUpperCase());
   const channels = arr(filters.channels).map(x => x.toUpperCase());
+  const leafChannel = channels.length ? makeLeafChannel() : null;
   const product = String(filters.product || '').trim().toUpperCase();
   return sourceRows.filter(r => {
     if (stores.length && !stores.includes(String(r.store).toUpperCase())) return false;
@@ -1339,7 +1365,7 @@ function filterBase(sourceRows, filters = {}) {
     if (salesTypes.length && !salesTypes.includes(String(r.salesType).toUpperCase())) return false;
     if (customerTypes.length && !customerTypes.includes(String(r.customerType || 'UNSPECIFIED').toUpperCase())) return false;
     if (storeStats.length && !storeStats.includes(effectiveStoreStatus(r).toUpperCase())) return false;
-    if (channels.length && !channels.includes(String(r.channel).toUpperCase())) return false;
+    if (channels.length && !channels.includes(String(leafChannel(r)).toUpperCase())) return false;
     if (product && !(`${r.sku} ${r.newItemCode} ${r.itemName}`.toUpperCase().includes(product))) return false;
     return true;
   });
@@ -1552,7 +1578,7 @@ function isoDatesInclusive(start,end){
 
 function dailyTrendQuery(sourceRows,period,filters,metricMode='value'){
   const mode=metricMode==='qty'?'qty':'value';
-  const requestedChannels=arr(filters.channels).map(x=>x.toUpperCase());
+  const requestedChannels=requestedMainChannels(arr(filters.channels).map(x=>x.toUpperCase()));
   const channels=activeChannels()
     .filter(c=>!requestedChannels.length || requestedChannels.includes(String(c.name).toUpperCase()))
     .map(c=>c.name);
@@ -3138,7 +3164,8 @@ app.get('/api/meta', requireAuth, (req,res)=>{
   const totals=monthIndexTotals();
 
   res.json({
-    channels:activeChannels().map(c=>c.name),
+    channels:activeChannels().flatMap(c=>[c.name,...activeSubChannels(c.name).map(s=>s.name)]),
+    subChannels:Object.fromEntries(activeChannels().flatMap(c=>activeSubChannels(c.name).map(s=>[s.name,c.name]))),
     channelGroups:{
       online:activeChannels().filter(c=>c.telemed).map(c=>c.name),
       offline:activeChannels().filter(c=>!c.telemed).map(c=>c.name)
